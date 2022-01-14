@@ -1,0 +1,156 @@
+<!doctype html><html lang=zh-cn dir=content><head><meta charset=utf-8><meta http-equiv=x-ua-compatible content="IE=edge,chrome=1"><meta name=viewport content="width=device-width,initial-scale=1,maximum-scale=1"><meta http-equiv=content-security-policy content="upgrade-insecure-requests"><title>Java Bit - 风云小记</title><meta name=keywords content="博客,程序员,架构师,思考,读书,笔记,技术,分享,大数据"><meta name=author content="小石头"><meta property="og:title" content="Java Bit"><meta property="og:site_name" content="风云小记"><meta property="og:image" content="/img/author.jpg"><meta name=title content="Java Bit - 风云小记"><meta name=description content="欢迎来到小石头的播客，个人主要专注于程序开发、大数据解决方案。"><link rel="shortcut icon" href=/img/favicon.ico><link rel=apple-touch-icon href=/img/apple-touch-icon.png><link rel=apple-touch-icon-precomposed href=/img/apple-touch-icon.png><link href=//cdn.bootcdn.net/ajax/libs/font-awesome/4.6.2/css/font-awesome.min.css rel=stylesheet type=text/css><link href=//cdn.bootcdn.net/ajax/libs/imageviewer/0.1.0/viewer.min.css rel=stylesheet><link href=/css/main.css rel=stylesheet type=text/css><link href=/css/syntax.css rel=stylesheet type=text/css><script type=text/javascript>var _hmt=_hmt||[];(function(){var hm=document.createElement("script");hm.src="https://hm.baidu.com/hm.js?ad6c6576883d3f6299f69e22157049d6";var s=document.getElementsByTagName("script")[0];s.parentNode.insertBefore(hm,s);})();</script></head><body itemscope itemtype=http://schema.org/WebPage lang=zh-hans><div class="container one-collumn sidebar-position-left page-home"><div class=headband></div><header id=header class=header itemscope itemtype=http://schema.org/WPHeader><div class=header-inner><div class=site-brand-container><div class=site-nav-toggle><div class=toggle role=button style=opacity:1;top:0><span class=toggle-line></span><span class=toggle-line></span><span class=toggle-line></span></div></div><div class=site-meta><div class=custom-logo-site-title><a href=/ class=brand rel=start><span class=logo-line-before><i></i></span><span class=site-title>风云小记</span>
+<span class=logo-line-after><i></i></span></a></div><p class=site-subtitle>一指流沙，程序年华</p></div><div class=site-nav-right><div class="toggle popup-trigger" style=opacity:1;top:0><i class="fa fa-search fa-fw fa-lg"></i></div></div></div><nav class=site-nav><ul id=menu class=menu><li class=menu-item><a href=/ rel=section><i class="menu-item-icon fa fa-fw fa-home"></i><br>首页</a></li><li class=menu-item><a href=/post rel=section><i class="menu-item-icon fa fa-fw fa-archive"></i><br>归档</a></li><li class=menu-item><a href=/about.html rel=section><i class="menu-item-icon fa fa-fw fa-user"></i><br>关于我</a></li><li class="menu-item menu-item-search"><a href=javascript:; class=popup-trigger><i class="menu-item-icon fa fa-search fa-fw"></i><br>搜索</a></li></ul><div class=site-search><div class="popup search-popup local-search-popup"><div class="local-search-header clearfix"><span class=search-icon><i class="fa fa-search"></i></span><span class=popup-btn-close><i class="fa fa-times-circle"></i></span><div class=local-search-input-wrapper><input autocomplete=off placeholder=搜索关键字... spellcheck=false type=text id=local-search-input autocapitalize=none autocorrect=off></div></div><div id=local-search-result></div></div></div></nav></div></header><main id=main class=main><div class=main-inner><div class=content-wrap><div id=content class=content><section id=posts class=posts-expand><article class="post post-type-normal" itemscope itemtype=http://schema.org/Article><header class=post-header><h1 class=post-title itemprop="name headline"><a class=post-title-link href=https://zstonec.github.io/post/java-bit/ itemprop=url>Java Bit</a></h1><div class=post-meta><span class=post-time><i class="fa fa-calendar-o fa-fw"></i><span class=post-meta-item-text>时间：</span>
+<time itemprop=dateCreated datetime=2016-03-22T13:04:35+08:00 content="2021-05-25">2021-05-25</time></span>
+<span>|
+<i class="fa fa-file-word-o fa-fw"></i><span class=post-meta-item-text>字数：</span>
+<span class=leancloud-world-count>879 字</span></span>
+<span>|
+<i class="fa fa-eye fa-fw"></i><span class=post-meta-item-text>阅读：</span>
+<span class=leancloud-view-count>5分钟</span></span>
+<span id=/post/java-bit/ class=leancloud_visitors data-flag-title="Java Bit">|
+<i class="fa fa-binoculars fa-fw"></i><span class=post-meta-item-text>阅读次数：</span>
+<span class=leancloud-visitors-count></span></span></div></header><div class=post-body itemprop=articleBody><p>本文主要介绍JAVA中的字节相关知识。</p><h2 id=bitbyteworld>bit、byte、world</h2><ul><li>bit (位) bit电脑记忆体中最小的单位，在二进位电脑系统中，每一bit可以代表0或1的数位讯号。所以它能表示的数字范围就是0 ~ 1。</li><li>byte (字节) 一个byte由8bit组成，所以理论上一个byte能表示的数据范围是0 ~ 255。</li><li>word (字) 一个word由2byte组成，所以理论上一个word能表示的数据范围是0 ~ 65535。</li></ul><p><img src=/img/bit/bit.png alt></p><h2 id=32-位与-64-位操作系统>32 位与 64 位操作系统</h2><p>一般计算机设备上，CPU 主要有 32 位和 64 位（当然，单片机有 8 位和 16 位），32 位 CPU 能够寻址的范围是 4 GB。所以过去的电脑设备内存最高一般只能到达 4 GB。后来，随着芯片技术的发展，越来越多的机器采用了 64 位 CPU。这使得机器的最大内存可以为 16 GB。</p><p>那么好，我们再来谈谈 32 位操作系统与 64 位操作系统。实际上它们分别是针对 CPU 类型设计的软件系统。</p><p>32 bit 是 4 byte。通常一条 CPU 指令是 4 byte。在 32 位操作系统上，如果一条 CPU 指令是 4 byte，那么 CPU 执行一次能够读取 32 bit 内容，所以一个指令周期内就能够完成指令，如果一条 CPU 指令是 8 byte 的话，那么 32 位操作系统就需要通过 2 个指令周期才能完成指令的读取，而对应的 64 位操作系统因为一次能够读取 64 bit 内容，所以它在一个指令周期就能够读取指令。所以，理论上，64 位的操作系统是要比 32 位操作系统要快 1 倍。</p><p>但还有几个需要大家注意的地方是：</p><ol><li>64 位 CPU 机器可以安装 32 位操作系统，但效率自然跟 32 位操作系统一样。</li><li>32 位 CPU 机器也可以安装 64 位操作系统。</li><li>64 位 CPU 机器安装 64 位操作系统才最有效率，但跟软件优化也有关系。</li></ol><p><strong>不同的操作系统平台，给 C/C++ 基本数据类型变量分配的字节是不一样的。</strong></p><p>32位编译器：</p><pre><code>char ：1个字节
+char*（即指针变量）: 4个字节（32位的寻址空间是2^32, 即32个bit，也就是4个字节。同理64位编译器）
+short int : 2个字节
+int：  4个字节
+unsigned int : 4个字节
+float:  4个字节
+double:   8个字节
+long:   4个字节
+long long:  8个字节
+unsigned long:  4个字节
+</code></pre><p>64位编译器：</p><pre><code> char ：1个字节
+ char*(即指针变量): 8个字节
+ short int : 2个字节
+ int：  4个字节
+ unsigned int : 4个字节
+ float:  4个字节
+ double:   8个字节
+ long:   8个字节
+ long long:  8个字节
+ unsigned long:  8个字节
+</code></pre><p>上面讲的是 C/C++ 在不同平台上的字节长度差别，但是对于 Java 而言，由于 Java 是跨平台语言，所以 JVM 表现下的基础数据字节长度其实都是一致的。</p><pre><code>byte：1 个字节。
+short：2 个字节。
+char：2 个字节。
+int：4 个字节。
+long：8 个字节。
+float：4 个字节。
+double：8 个字节。
+boolean：boolean属于布尔类型，在存储的时候不使用字节，仅仅使用 1 位来存储，范围仅仅为0和1，其字面量为true和false。
+</code></pre><p>我们可以看到 Java 与 C/C++ 的基本数据类型字节长度有些不一致，所以涉及到网络通信交互或者是 JNI 开发时，数据的转换有时需要考虑下基础的字节长度。</p><p>本篇文章的主要内容是 Java 中的位操作，所以基础数据长度也是以 Java 中定义的为准。</p><h2 id=原码反码补码>原码、反码、补码</h2><p>我们已经知道了一个 int 型数值是 4 个字节。每个字节有 8 位。但对于一个 int 或者其它整数类型如 （long）的数值而言还要注意的是，它的最高位是符号位。</p><p>最高位为0表示正数。</p><p>最高位为1表示负数</p><ul><li><p>原码 将一个数字转换成二进制就是这个数值的原码。</p><pre><code>  int a =  5;  //原码  0000 0000 0000 0101
+  int b = -3;  //原码  1000 0000 0000 0011
+</code></pre></li><li><p>反码 分两种情况：正数和负数</p><p>正数 正数的反码就是原码。</p><p>负数 负数的反码是在原码的基础上，符号位不变，其它位都取反。</p><pre><code>   5 的原码：0000 0000 0000 0101
+   5 的反码：0000 0000 0000 0101
+  -3 的原码：1000 0000 0000 0011
+  -3 的反码：1111 1111 1111 1100
+</code></pre></li><li><p>补码 仍然分正数和负数两种情况</p><p>正数 正数的补码就是原码。</p><p>负数 负数的补码在反码的基础上加1。</p><pre><code>   5 的反码：0000 0000 0000 0101
+   5 的补码：0000 0000 0000 0101
+  -3 的反码：1111 1111 1111 1100
+  -3 的补码：1111 1111 1111 1101
+</code></pre></li></ul><p>计算机在进行数值运算的时候，是通过补码表示每个数值的。</p><p>比如</p><pre><code>5 - 3 = 5 + ( -3 )
+</code></pre><p>相当于</p><pre><code>0000 0000 0000 0101 + 1111 1111 1111 1101 = 1 0000 0000 0000 0010
+</code></pre><p><img src=/img/bit/bit_op.png alt></p><h2 id=运算符>运算符(&、|、~、^、&#171;、&#187;、&#187;>)</h2><p>位运算符包含与运算符、或运算符、取反运算符、异或运算符、左移运算符和右移运算符。在下面的内容中，我将会一一讲解。</p><p>需要注意的是，下面测试用的数据都是 int 类型，int 类型是 4 个字节长度，但是为了方便说明示例中用的数值我都用 1 个字节表示。希望不会给大家造成困扰。</p><h3 id=与运算符>与运算符(&)</h3><p><strong>规则</strong> 与运算时，进行运算的两个数，从最低位到最高位，一一对应。如果某 bit 的两个数值对应的值都是 1，则结果值相应的 bit 就是 1，否则为 0.</p><pre><code>0 &amp; 0 = 0
+0 &amp; 1 = 0
+1 &amp; 1 = 1
+</code></pre><p>3 & 5 = 1 这是因为</p><pre><code>0000 0011
+
+&amp;
+
+0000 0101
+
+=
+
+0000 0001
+</code></pre><p>按照规则，将两个数值按照低位到高位一一对齐运算，因为只有第 0 位都为 1，所以计算结果为 1.</p><h3 id=或运算符>或运算符(|)</h3><p><strong>规则</strong> 或运算时，进行运算的两个数，从最低位到最高位，一一对应。如果某 bit 的两个数值对应的值只要 1 个为 1，则结果值相应的 bit 就是 1，否则为 0。</p><pre><code>0 | 0 = 0
+0 | 1 = 1
+1 | 1 = 1
+</code></pre><p>3 | 5 = 7 这是因为</p><pre><code>0000 0011
+
+|
+
+0000 0101
+
+=
+
+0000 0111
+</code></pre><h3 id=取反运算符>取反运算符（~）</h3><p><strong>规则</strong> 对操作数的每一位进行操作，1 变成 0，0 变成 1。</p><pre><code>~5 =&gt;  0000 0101   ~  =&gt; 1111 1010
+</code></pre><h3 id=异或运算符>异或运算符(^)</h3><p><strong>规则</strong> 两个操作数进行异或时，对于同一位上，如果数值相同则为 0，数值不同则为 1。</p><pre><code>1 ^ 0 = 1
+1 ^ 1 = 0
+0 ^ 0 = 0
+</code></pre><p>3 ^ 5 = 6,这是因为</p><pre><code>0000 0011
+
+|
+
+0000 0101
+
+=
+
+0000 0110
+</code></pre><p>值得注意的是 3 ^ 5 = 6,而 6 ^ 5 = 3</p><pre><code>0000 0110
+
+|
+
+0000 0101
+
+=
+
+0000 0011
+</code></pre><p>针对这个特性，我们可以将异或运算作为一个简单的数据加密的形式。比如，将一个mp4文件所有数值与一个种子数值进行异或得到加密后的数据，解密的时候再将数据与种子数值进行异或一次就可以了。</p><p>所以说异或运算可以作为简单的加解密运算算法。</p><h3 id=左移运算符>左移运算符(&#171;)</h3><p><strong>规则</strong> a &#171; b 将数值 a 的二进制数值从 0 位算起到第 b - 1 位，整体向左方向移动 b 位，低位空出来的位补数值 0。注意：符号位也会移动。</p><pre><code>5 &lt;&lt; 1 ===&gt;  1000 0000 0000 0101 &lt;&lt; 1  = 1000 0000 0000 1010 = 10
+7 &lt;&lt; 2 ===&gt;  1000 0000 0000 0111 &lt;&lt; 2  = 1000 0000 0001 1100 = 28
+9 &lt;&lt; 3 ===&gt;  1000 0000 0000 1001 &lt;&lt; 3  = 1000 0000 0100 1000 = 72
+11 &lt;&lt; 2 ===&gt; 1000 0000 0000 1011 &lt;&lt; 2  = 1000 0000 0010 1100 = 44
+</code></pre><p>很明显就可以看出 a &#171; b = a * (2 ^ b)</p><p>如果某个数值左移 n 位，就相当于这个数值乘以 2 ^ n（前提是没有数据溢出）。</p><p>先随便定义一个int类型的数int，十进制的value = 733183670，转换成二进制在计算机中的表示如下：</p><p><img src=/img/bit/zuoyi.png alt></p><p>value &#171; 1，左移1位</p><p><img src=/img/bit/zuoyi1.png alt></p><p>左移1位后换算成十进制的值为：1466367340，刚好是733183670的两倍，有些人在乘2操作时喜欢用左移运算符来替代。</p><p>value &#171; 8，左移8位看一下：</p><p><img src=/img/bit/zuoyi2.png alt></p><p>左移8位后变成了十进制的值为：-1283541504，移动8位后，由于首位变成了1，也就是说成了负数，在使用中要考虑变成负数的情况。</p><p>根据这个规则，左移32位后，右边补上32个0值是不是就变成了十进制的0了？答案是NO，当int类型进行左移操作时，左移位数大于等于32位操作时，会先求余（%）后再进行左移操作。也就是说左移32位相当于不进行移位操作，左移40位相当于左移8位（40%32=8）。当long类型进行左移操作时，long类型在二进制中的体现是64位的，因此求余操作的基数也变成了64，也就是说左移64位相当于没有移位，左移72位相当于左移8位（72%64=8），写一段代码来测试一下:</p><pre><code>int intValue = 733183670;//随意写一个数	
+System.out.println(&quot;intValue：&quot; + (intValue));//打印intValue
+System.out.println(&quot;intValue左移1位：&quot; + (intValue &lt;&lt; 1));//左移1位
+System.out.println(&quot;intValue左移8位：&quot; + (intValue &lt;&lt; 8));//左移8位
+//当int类型左移位数大于等于32位操作时，会先求余后再进行移位操作
+System.out.println(&quot;intValue左移32位：&quot; + (intValue &lt;&lt; 32));//求余为32%32=0，相当于左移0位（不移位）
+System.out.println(&quot;intValue左移40位：&quot; + (intValue &lt;&lt; 40));//求余为40%32=8，相当于左移8位
+System.out.println(&quot;intValue左移64位：&quot; + (intValue &lt;&lt; 64));//求余为64%32=0，相当于左移0位（不移位）
+		
+long longValue = 733183670L;
+System.out.println(&quot;longValue：&quot; + (longValue));//打印longValue
+System.out.println(&quot;longValue左移1位：&quot; + (longValue &lt;&lt; 1));//左移1位
+System.out.println(&quot;longValue左移8位：&quot; + (longValue &lt;&lt; 8));//左移8位
+//当long类型左移位数大于等于64位操作时，会先求余后再进行移位操作
+System.out.println(&quot;longValue左移64位：&quot; + (longValue &lt;&lt; 64));//求余为64%64=0，相当于左移0位（不移位）
+System.out.println(&quot;longValue左移72位：&quot; + (longValue &lt;&lt; 72));//求余为72%64=8，相当于左移8位
+System.out.println(&quot;longValue左移128位：&quot; + (longValue &lt;&lt; 128));//求余为128%64=0，相当于左移0位（不移位）
+</code></pre><p><img src=/img/bit/zuoyi_result.jpg alt></p><p>由于double，float在二进制中的表现比较特殊，因此不能来进行移位操作，报错，编译不过，如下图：</p><p><img src=/img/bit/zuoyi3.png alt></p><p>注意：其它几种整形byte，short移位前会先转换为int类型（32位）再进行移位，这里就不写代码测试了，大家有兴趣可自行测试。</p><p>综上所述：左移 &#171; 其实很简单，也就是说丢弃左边指定位数，右边补0。</p><h3 id=右移运算符>右移运算符(&#187;)</h3><p><strong>规则</strong> a &#187; b 将数值 a 的二进制数值从 0 位算起到第 b - 1 位，整体向右方向移动 b 位，高位空出来的补符号位。</p><pre><code>5 &gt;&gt; 1 ===&gt;  1000 0000 0000 0101 &gt;&gt; 1  = 1000 0000 0000 0010 = 2
+7 &gt;&gt; 2 ===&gt;  1000 0000 0000 0111 &gt;&gt; 2  = 1000 0000 0000 0001 = 1
+9 &gt;&gt; 3 ===&gt;  1000 0000 0000 1001 &gt;&gt; 3  = 1000 0000 0000 0001 = 1
+11 &gt;&gt; 2 ===&gt; 1000 0000 0000 1011 &gt;&gt; 2  = 1000 0000 0000 0010 = 2
+</code></pre><p>大家发现什么规律没有？a &#187; b = a / ( 2 ^ b ) ,所以 5 &#187; 1= 5 / 2 = 2,11 &#187; 2 = 11 / 4 = 2。</p><p>如果某个数值右移 n 位，就相当于拿这个数值去除以 2 的 n 次幂。</p><p><img src=/img/bit/youyi.png alt></p><p>value &#187; 1，右移1位</p><p><img src=/img/bit/youyi1.png alt></p><p>右移1位后换算成十进制的值为：366591835，刚好是733183670的1半， 有些人在除2操作时喜欢用右移运算符来替代</p><p>value &#187; 8，右移8位看一下</p><p><img src=/img/bit/youyi2.png alt></p><p>写一段代码测试一下</p><pre><code>int intValue = 733183670;//随意写一个数
+System.out.println(&quot;intValue：&quot; + (intValue));//打印intValue
+System.out.println(&quot;intValue右移1位：&quot; + (intValue &gt;&gt; 1));//右移1位
+System.out.println(&quot;intValue右移8位：&quot; + (intValue &gt;&gt; 8));//右移8位
+//当int类型右移位数大于等于32位操作时，会先求余后再进行移位操作
+System.out.println(&quot;intValue右移32位：&quot; + (intValue &gt;&gt; 32));//求余为32%32=0，相当于右移0位（不移位）
+System.out.println(&quot;intValue右移40位：&quot; + (intValue &gt;&gt; 40));//求余为40%32=8，相当于右移8位
+System.out.println(&quot;intValue右移64位：&quot; + (intValue &gt;&gt; 64));//求余为64%32=0，相当于右移0位（不移位）
+		
+long longValue = 733183670L;
+System.out.println(&quot;longValue：&quot; + (longValue));//打印longValue
+System.out.println(&quot;longValue右移1位：&quot; + (longValue &gt;&gt; 1));//右移1位
+System.out.println(&quot;longValue右移8位：&quot; + (longValue &gt;&gt; 8));//右移8位
+//当long类型右移位数大于等于64位操作时，会先求余后再进行移位操作
+System.out.println(&quot;longValue右移64位：&quot; + (longValue &gt;&gt; 64));//求余为64%64=0，相当于右移0位（不移位）
+System.out.println(&quot;longValue右移72位：&quot; + (longValue &gt;&gt; 72));//求余为72%64=8，相当于右移8位
+System.out.println(&quot;longValue右移128位：&quot; + (longValue &gt;&gt; 128));//求余为128%64=0，相当于右移0位（不移位）
+</code></pre><p><img src=/img/bit/youyi_result.jpg alt></p><p>和左移一样，int类型移位大于等于32位时，long类型大于等于64位时，会先做求余处理再位移处理，byte，short移位前会先转换为int类型（32位）再进行移位。以上是正数的位移，我们再来看看负数的右移运算，如图，负数intValue：-733183670的二进制表现如下图：</p><p><img src=/img/bit/youyi4.png alt></p><p>右移8位，intValue &#187; 8</p><p><img src=/img/bit/youyi5.png alt></p><p>综上所述：右移运算符&#187;的运算规则也很简单，丢弃右边指定位数，左边补上符号位。</p><h3 id=无符号右移运算符>无符号右移运算符(&#187;>)</h3><p>无符号右移运算符&#187;>和右移运算符&#187;是一样的，只不过右移时左边是补上符号位，而无符号右移运算符是补上0，也就是说，对于正数移位来说等同于：&#187;，负数通过此移位运算符能移位成正数。以-733183670&#187;>8为例来画一下图:</p><p><img src=/img/bit/un_youyi.png alt></p><p>无符号右移运算符&#187;的运算规则也很简单，丢弃右边指定位数，左边补上0。</p><h2 id=总结>总结</h2><ul><li>箭头朝哪边，就往哪边移位</li><li>左移操作相当于乘2，右移相当于除2，不全是</li><li>左移操作可能改变正负，因为符号位会被移走，新符号位不一定和以前一样</li><li>右移操作不改变符号，因为左边填充的是符号位</li><li>无符号右移会把负数变成正数</li><li>没有无符号左移</li><li>位移超过JAVA基本类型的位数后，等同于位移取模后的位数</li></ul><h2 id=问题位移负数位>问题：位移负数位</h2><p>官方文档：</p><p><a href=https://docs.oracle.com/javase/specs/jls/se10/html/jls-15.html#jls-15.19>https://docs.oracle.com/javase/specs/jls/se10/html/jls-15.html#jls-15.19</a></p></div><footer class=post-footer><div class=post-tags><a href=/tags/java rel=tag title=JAVA>#JAVA#</a></div><div class=post-nav><div class=clear></div></div><div class=reward-qr-info></div><div class=post-nav><div class="post-nav-next post-nav-item"><a href=https://zstonec.github.io/post/kafka-consumer/ rel=next title="Kafka Consumer"><i class="fa fa-chevron-left"></i>Kafka Consumer</a></div><div class="post-nav-prev post-nav-item"><a href=https://zstonec.github.io/post/druid-segment/ rel=prev title="Druid Segment">Druid Segment
+<i class="fa fa-chevron-right"></i></a></div></div><div id=wcomments></div></footer></article></section></div></div><div class=sidebar-toggle><div class=sidebar-toggle-line-wrap><span class="sidebar-toggle-line sidebar-toggle-line-first"></span><span class="sidebar-toggle-line sidebar-toggle-line-middle"></span><span class="sidebar-toggle-line sidebar-toggle-line-last"></span></div></div><aside id=sidebar class=sidebar><div class=sidebar-inner><section class="site-overview sidebar-panel sidebar-panel-active"><div class="site-author motion-element" itemprop=author itemscope itemtype=http://schema.org/Person><img class=site-author-image itemprop=image src=/img/avatar.png alt=小石头><p class=site-author-name itemprop=name>小石头</p><p class="site-description motion-element" itemprop=description>再平凡的人也有属于他自己的梦想!</p></div><nav class="site-state motion-element"><div class="site-state-item site-state-posts"><a href=/post/><span class=site-state-item-count>9</span>
+<span class=site-state-item-name>日志</span></a></div><div class="site-state-item site-state-categories"><a href=/categories/><span class=site-state-item-count>2</span>
+<span class=site-state-item-name>分类</span></a></div><div class="site-state-item site-state-tags"><a href=/tags/><span class=site-state-item-count>10</span>
+<span class=site-state-item-name>标签</span></a></div></nav><div class="links-of-author motion-element"><span class=links-of-author-item><a href=https://github.com/zstonec/ target=_blank title=GitHub><i class="fa fa-fw fa-github"></i>GitHub</a></span></div><div class="tagcloud-of-blogroll motion-element tagcloud-of-blogroll-inline"><div class=tagcloud-of-blogroll-title><i class="fa fa-fw fa-tags"></i>标签云</div><ul class=tagcloud-of-blogroll-list><li class=tagcloud-of-blogroll-item><a href=/tags/druid>Druid</a></li><li class=tagcloud-of-blogroll-item><a href=/tags/markdown>Markdown</a></li><li class=tagcloud-of-blogroll-item><a href=/tags/css>Css</a></li><li class=tagcloud-of-blogroll-item><a href=/tags/emoji>Emoji</a></li><li class=tagcloud-of-blogroll-item><a href=/tags/html>Html</a></li><li class=tagcloud-of-blogroll-item><a href=/tags/java>Java</a></li><li class=tagcloud-of-blogroll-item><a href=/tags/kafka>Kafka</a></li><li class=tagcloud-of-blogroll-item><a href=/tags/privacy>Privacy</a></li><li class=tagcloud-of-blogroll-item><a href=/tags/shortcodes>Shortcodes</a></li><li class=tagcloud-of-blogroll-item><a href=/tags/text>Text</a></li></ul></div></section></div></aside></div></main><footer id=footer class=footer><div class=footer-inner><div class=copyright><span class=copyright-year>&copy; 2021 - 2022</span>
+<span class=with-love><i class="fa fa-heart"></i></span><span class=copyright-author>风云小记</span></div><div class=vistor-info><script async src=//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js></script><span class=site-uv><i class="fa fa-user"></i><span class=busuanzi-value id=busuanzi_value_site_uv></span></span><span class=separator-line>/</span>
+<span class=site-pv><i class="fa fa-eye"></i><span class=busuanzi-value id=busuanzi_value_site_pv></span></span></div></div></footer><div class=back-to-top><i class="fa fa-arrow-up"></i><span id=scrollpercent><span>0</span>%</span></div></div><script type=text/javascript src=//cdn.bootcdn.net/ajax/libs/jquery/2.1.4/jquery.min.js></script><script src=//cdn.bootcdn.net/ajax/libs/imageviewer/0.1.0/viewer.min.js></script><script type=text/javascript src=/js/search.js></script><script type=text/javascript src=/js/affix.js></script><script type=text/javascript src=/js/scrollspy.js></script><script type=text/javascript>function getCntViewHeight(){var docHeight=$('#content').height(),winHeight=$(window).height(),cntViewHeight=(docHeight>winHeight)?(docHeight-winHeight):($(document).height()-winHeight);return cntViewHeight;}
+function getScrollbarWidth(){var $div=$('<div />').addClass('scrollbar-measure').prependTo('body');var div=$div[0];var scrollbarWidth=div.offsetWidth-div.clientWidth;$div.remove();return scrollbarWidth;}
+function registerBackTop(){var THRESHOLD=50;var $top=$('.back-to-top');$(window).on('scroll',function(){$top.toggleClass('back-to-top-on',window.pageYOffset>THRESHOLD);var scrollTop=$(window).scrollTop();var cntViewHeight=getCntViewHeight();var scrollPercent=(scrollTop)/(cntViewHeight);var scrollPercentRounded=Math.round(scrollPercent*100);var scrollPercentMaxed=(scrollPercentRounded>100)?100:scrollPercentRounded;$('#scrollpercent>span').html(scrollPercentMaxed);});$top.on('click',function(){$("html,body").animate({scrollTop:0,screenLeft:0,},800);});}
+function initScrollSpy(){var tocSelector='.post-toc';var $tocElement=$(tocSelector);var activeCurrentSelector='.active-current';$tocElement.on('activate.bs.scrollspy',function(){var $currentActiveElement=$(tocSelector+' .active').last();removeCurrentActiveClass();$currentActiveElement.addClass('active-current');}).on('clear.bs.scrollspy',removeCurrentActiveClass);$('body').scrollspy({target:tocSelector});function removeCurrentActiveClass(){$(tocSelector+' '+activeCurrentSelector).removeClass(activeCurrentSelector.substring(1));}}
+function initAffix(){var headerHeight=$('.header-inner').height();var footerOffset=parseInt($('.main').css('padding-bottom'),10);var sidebarTop=headerHeight+10;$('.sidebar-inner').affix({offset:{top:sidebarTop,bottom:footerOffset}});$(document).on('affixed.bs.affix',function(){updateTOCHeight(document.body.clientHeight-100);});}
+function initTOCDimension(){var updateTOCHeightTimer;$(window).on('resize',function(){updateTOCHeightTimer&&clearTimeout(updateTOCHeightTimer);updateTOCHeightTimer=setTimeout(function(){var tocWrapperHeight=document.body.clientHeight-100;updateTOCHeight(tocWrapperHeight);},0);});updateTOCHeight(document.body.clientHeight-100);var scrollbarWidth=getScrollbarWidth();$('.post-toc').css('width','calc(100% + '+scrollbarWidth+'px)');}
+function updateTOCHeight(height){height=height||'auto';$('.post-toc').css('max-height',height);}
+$(function(){var sidebarTop=$('.header-inner').height()+10;$('#sidebar').css({'margin-top':sidebarTop}).show();var headerHeight=$('.header-inner').height();var sidebarHeight=$('.sidebar-inner').height();var leftHeight=headerHeight+sidebarHeight+50;var contentHeight=$('.content-wrap').height();if(contentHeight<leftHeight){$('.content-wrap').css('height',leftHeight+50);}
+$('.site-nav-toggle').on('click',function(){var $siteNav=$('.site-nav');var $toggleLine=$('.toggle');var ON_CLASS_NAME='site-nav-on';var CLOSE_CLASS_NAME='toggle-close';var isSiteNavOn=$siteNav.hasClass(ON_CLASS_NAME);var animateAction=isSiteNavOn?'slideUp':'slideDown';var animateCallback=isSiteNavOn?'removeClass':'addClass';$siteNav.stop()[animateAction]('normal',function(){$siteNav[animateCallback](ON_CLASS_NAME);$toggleLine[animateCallback](CLOSE_CLASS_NAME);});});registerBackTop();initScrollSpy();initAffix();initTOCDimension();$('.post-body').viewer();$('.sidebar-nav-toc').click(function(){$(this).addClass('sidebar-nav-active');$(this).next().removeClass('sidebar-nav-active');$('.'+$(this).next().attr('data-target')).toggle(500);$('.'+$(this).attr('data-target')).toggle(500);});$('.sidebar-nav-overview').click(function(){$(this).addClass('sidebar-nav-active');$(this).prev().removeClass('sidebar-nav-active');$('.'+$(this).prev().attr('data-target')).toggle(500);$('.'+$(this).attr('data-target')).toggle(500);});});</script><script src=//cdn.jsdelivr.net/npm/@waline/client/dist/Waline.min.js></script><script type=text/javascript>new Waline({el:'#wcomments',visitor:true,placeholder:' 欢迎留下您的宝贵建议. ^_^ ',requiredFields:['nick','mail'],serverURL:"https:\/\/comment-api-gules.vercel.app\/",lang:"zh-cn"});</script><script>(function(){var bp=document.createElement('script');var curProtocol=window.location.protocol.split(':')[0];if(curProtocol==='https'){bp.src='https://zz.bdstatic.com/linksubmit/push.js';}
+else{bp.src='http://push.zhanzhang.baidu.com/push.js';}
+var s=document.getElementsByTagName("script")[0];s.parentNode.insertBefore(bp,s);})();</script></body></html>

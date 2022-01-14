@@ -1,0 +1,111 @@
+<!doctype html><html lang=zh-cn dir=content><head><meta charset=utf-8><meta http-equiv=x-ua-compatible content="IE=edge,chrome=1"><meta name=viewport content="width=device-width,initial-scale=1,maximum-scale=1"><meta http-equiv=content-security-policy content="upgrade-insecure-requests"><title>Druid Segment - 风云小记</title><meta name=keywords content="博客,程序员,架构师,思考,读书,笔记,技术,分享,大数据"><meta name=author content="小石头"><meta property="og:title" content="Druid Segment"><meta property="og:site_name" content="风云小记"><meta property="og:image" content="/img/author.jpg"><meta name=title content="Druid Segment - 风云小记"><meta name=description content="欢迎来到小石头的播客，个人主要专注于程序开发、大数据解决方案。"><link rel="shortcut icon" href=/img/favicon.ico><link rel=apple-touch-icon href=/img/apple-touch-icon.png><link rel=apple-touch-icon-precomposed href=/img/apple-touch-icon.png><link href=//cdn.bootcdn.net/ajax/libs/font-awesome/4.6.2/css/font-awesome.min.css rel=stylesheet type=text/css><link href=//cdn.bootcdn.net/ajax/libs/imageviewer/0.1.0/viewer.min.css rel=stylesheet><link href=/css/main.css rel=stylesheet type=text/css><link href=/css/syntax.css rel=stylesheet type=text/css><script type=text/javascript>var _hmt=_hmt||[];(function(){var hm=document.createElement("script");hm.src="https://hm.baidu.com/hm.js?ad6c6576883d3f6299f69e22157049d6";var s=document.getElementsByTagName("script")[0];s.parentNode.insertBefore(hm,s);})();</script></head><body itemscope itemtype=http://schema.org/WebPage lang=zh-hans><div class="container one-collumn sidebar-position-left page-home"><div class=headband></div><header id=header class=header itemscope itemtype=http://schema.org/WPHeader><div class=header-inner><div class=site-brand-container><div class=site-nav-toggle><div class=toggle role=button style=opacity:1;top:0><span class=toggle-line></span><span class=toggle-line></span><span class=toggle-line></span></div></div><div class=site-meta><div class=custom-logo-site-title><a href=/ class=brand rel=start><span class=logo-line-before><i></i></span><span class=site-title>风云小记</span>
+<span class=logo-line-after><i></i></span></a></div><p class=site-subtitle>一指流沙，程序年华</p></div><div class=site-nav-right><div class="toggle popup-trigger" style=opacity:1;top:0><i class="fa fa-search fa-fw fa-lg"></i></div></div></div><nav class=site-nav><ul id=menu class=menu><li class=menu-item><a href=/ rel=section><i class="menu-item-icon fa fa-fw fa-home"></i><br>首页</a></li><li class=menu-item><a href=/post rel=section><i class="menu-item-icon fa fa-fw fa-archive"></i><br>归档</a></li><li class=menu-item><a href=/about.html rel=section><i class="menu-item-icon fa fa-fw fa-user"></i><br>关于我</a></li><li class="menu-item menu-item-search"><a href=javascript:; class=popup-trigger><i class="menu-item-icon fa fa-search fa-fw"></i><br>搜索</a></li></ul><div class=site-search><div class="popup search-popup local-search-popup"><div class="local-search-header clearfix"><span class=search-icon><i class="fa fa-search"></i></span><span class=popup-btn-close><i class="fa fa-times-circle"></i></span><div class=local-search-input-wrapper><input autocomplete=off placeholder=搜索关键字... spellcheck=false type=text id=local-search-input autocapitalize=none autocorrect=off></div></div><div id=local-search-result></div></div></div></nav></div></header><main id=main class=main><div class=main-inner><div class=content-wrap><div id=content class=content><section id=posts class=posts-expand><article class="post post-type-normal" itemscope itemtype=http://schema.org/Article><header class=post-header><h1 class=post-title itemprop="name headline"><a class=post-title-link href=https://zstonec.github.io/post/druid-segment/ itemprop=url>Druid Segment</a></h1><div class=post-meta><span class=post-time><i class="fa fa-calendar-o fa-fw"></i><span class=post-meta-item-text>时间：</span>
+<time itemprop=dateCreated datetime=2016-03-22T13:04:35+08:00 content="2021-05-25">2021-05-25</time></span>
+<span>|
+<i class="fa fa-file-word-o fa-fw"></i><span class=post-meta-item-text>字数：</span>
+<span class=leancloud-world-count>165 字</span></span>
+<span>|
+<i class="fa fa-eye fa-fw"></i><span class=post-meta-item-text>阅读：</span>
+<span class=leancloud-view-count>1分钟</span></span>
+<span id=/post/druid-segment/ class=leancloud_visitors data-flag-title="Druid Segment">|
+<i class="fa fa-binoculars fa-fw"></i><span class=post-meta-item-text>阅读次数：</span>
+<span class=leancloud-visitors-count></span></span></div></header><div class=post-body itemprop=articleBody><p>本文从druid存储文件入手，由下而上，分析segment的存储结构，力求详尽。</p><h2 id=druid-segment存储目录>druid segment存储目录</h2><p>druid的segment存储在hdfs中，路径如下：</p><pre><code>/user/xxx/druid-test/segments/datasource-demo/20210128T070000.000Z_20210128T080000.000Z/2021-01-28T19_43_30.730Z/9_index.zip
+</code></pre><p>存储路径格式为</p><pre><code>/basePath/dataSource/start_end/version/shardNum_index.zip
+</code></pre><h2 id=包含的文件>包含的文件</h2><p>其中zip文件解压后的内容如下：</p><pre><code>meta.smoosh
+factory.json
+00000.smoosh
+version.bin
+</code></pre><ul><li><p>factory.json</p><pre><code>  {&quot;type&quot;:&quot;mMapSegmentFactory&quot;}
+</code></pre></li><li><p>version.bin</p><pre><code>  二进制文件. 一个4byte的整数值作为版本号。比如对于v9版本的segment，版本号是：0x0,0x0,0x0,0x9
+</code></pre></li><li><p>00000.smoosh</p><pre><code>  二进制数据文件
+</code></pre></li><li><p>meta.smoosh</p><p>内容如下</p><div class=highlight><pre style=background-color:#f8f8f8;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-fallback data-lang=fallback>v1,2147483647,1
+__time,0,0,180257
+city,0,180257,355650
+country,0,103343702,103367399
+province,0,110937398,110961158
+click,0,32192346,32700262
+exposure,0,30034665,32192346
+count,0,896163,3122006
+metadata.drd,0,3122006,31219991
+index.drd,0,31219991,61219991
+</code></pre></div><div class=highlight><pre style=background-color:#f8f8f8;-moz-tab-size:4;-o-tab-size:4;tab-size:4><code class=language-fallback data-lang=fallback>
+ 第一行的格式为
+
+ |  segment版本号   | xxxxx.smoosh文件最大值（默认是2G）  | xxxxx.smoosh文件个数| 
+ |  ----  | ----  |----  |
+ |v1|2147483647|1|
+   
+ 后面行的格式为
+           
+   
+ |  column  | smooshId  | startPos | endPos|
+ |  ----  | ----  |----  |----|
+ |__time|0|0|180257|
+ | city |0|180257|355650|
+ 我们容易想到，可以根据meta.smoosh文件分析每列占用空间大小
+
+
+
+ |  column  |size  |
+ |  ----  | ----  |
+ |`city`|46852226|
+ |`metadata.drd`|3836|
+ |`index.drd`|2634|
+
+
+</code></pre></div></li></ul><h2 id=segment逻辑结构>segment逻辑结构</h2><p>Druid的列有三种基本类型：Timestamp类型，Dimension类型和Metric类型</p><p><img src=/img/druid-sgement/druid-column-types.png alt></p><p>Timestamp列和Metric列比较简单，他们在实现中被存储为通过lz4压缩的整型或浮点数组。当一个查询需要访问某列数据时，只需要解压缩这些列，然后读取出这些列的数据，然后执行预定义的聚合操作。对于查询过程中不需要的列，Druid会直接跳过对这些列数据的访问。</p><p>Dimension列由于要实现filter和group-by操作，它的实现有些不同，dimension列包行下列三种数据结构：</p><ul><li>一个字典：将值从字符串（所有的dimension列的数值都被当做字符串处理）映射到整数id。</li><li>一个值的列表（正排数据）：把列中的数值通过字典编码以后，将数字id存储在列表里面。</li><li>一个bitmap倒排索引：对于列里面的每个不同的值，都对应存储为一个bitmap，用来表示哪一行数据包含该值。</li></ul><p>为什么我们需要这三种数据结构呢？通过字典将字符串映射成数字id，数字id通常比字符串更小，因此可以被更紧凑的存储。第三点中的bitmap，通常被称为倒排索引，用于支持快速的过滤操作（bitmap对AND和OR操作的速度非常快）。最后，第二点中的值列表将用于支持group by和topN查询，而普通的查询只需要根据filter出来的行去来聚合相应的metirc就可以了，而不需要访问上述2中的值列表。</p><pre><code>1.编码了列值的字典：
+
+    {
+        'Justin Bieber': 0,
+        'Ke$ha':         1
+    }
+
+2.列值数据（正排）：
+	
+    [0, 0, 1, 1](第一个和第二个0代表第一，二行数据编码，即上述字典中的'Justin BieBer'，第三个和第四个代表第三四行数据，即上述字典中的'Ke$ha')
+
+3.Bitmaps：字典中的每个值对应一个bitmap
+	
+    value='Justin Bieber': [1, 1, 0, 0]
+    value='Ke$ha': [0, 0, 1, 1]
+</code></pre><p>注意bitmap跟其他两种数据结构不同，其他两种数据结构都是跟随数据量的增长而线性增长的（最差情况下），而bitmap的大小=数据的总行数*列中值的种类数（也就是字典的size）。这就意味着如果值得的种类很多，那么bitmap中为1的数量将会非常稀疏，这种情况下bitmap有可能被大幅压缩。Druid针对这种情况，采用了特殊的压缩算法，比如roaring bitmap压缩算法。</p><p>如果datasource使用了多值列，那么segment里面的数据结构就稍微有些不同。让我们对上面例子中的数据稍微做一下修改，来演示多之列的情况。假设上述表格中的第二行的page列，同时被标注为Ke$ha和Justin Bieber，这种情况下，上面的三种数据结构如下图所示：</p><pre><code>1.编码了列值的字典：
+{
+    'Justin Bieber': 0,
+    'Ke$ha':         1
+}
+
+2.列值数据（正排）：
+[0, 
+[0,1], &lt;-------（多个值）
+1, 
+1](第一个和第二个0代表第一，二行数据编码，即上述字典中的'Justin BieBer'，第三个和第四个代表第三四行数据，即上述字典中的'Ke$ha')
+
+3.Bitmaps：字典中的每个值对应一个bitmap
+value='Justin Bieber': [1, 1, 0, 0]
+value='Ke$ha':         [0, 1, 1, 1]
+                        ^
+                        |
+                        |
+            多值列在多个value中有多个不为0的标识
+</code></pre><p>Segment的分区（Sharding）</p><p>对于有些datasource来说，同一时间区间之内可能存在多个segment。这些segment构成了该时间区间的一个block。根据shardspec配置有两种类型，其中之一要求druid只能在block里面的segment都ready的情况下才能提供查询。也就是说，如果有下面3个segment:</p><pre><code>sampleData_2011-01-01T02:00:00:00Z_2011-01-01T03:00:00:00Z_v1_0
+
+sampleData_2011-01-01T02:00:00:00Z_2011-01-01T03:00:00:00Z_v1_1
+
+sampleData_2011-01-01T02:00:00:00Z_2011-01-01T03:00:00:00Z_v1_2
+</code></pre><p>所有的这三个segment必须都被加载以后才能提供查询。</p><p>但是当使用线性分片配置时，druid并不要求所有的segment都ready时才能提供查询。比如，在使用线性分片配置时，当你的实时数据导入模块创建了3个segment，如果只有两个segment被加载，druid将只返回在这两个segment上的查询结果。</p><h2 id=druid的索引类型>druid的索引类型</h2><ul><li>IncrementalIndex - IncrementalIndexStorageAdapter</li><li>QueryableIndex - QueryableIndexStorageAdapter</li></ul><h2 id=segemt加载过程>segemt加载过程</h2><ul><li>SegmentLoadDropHandler</li></ul><h2 id=对应代码实现smooshedfilemapper>对应代码实现SmooshedFileMapper</h2></div><footer class=post-footer><div class=post-tags><a href=/tags/druid rel=tag title=druid>#druid#</a></div><div class=post-nav><div class=clear></div></div><div class=reward-qr-info></div><div class=post-nav><div class="post-nav-next post-nav-item"><a href=https://zstonec.github.io/post/java-bit/ rel=next title="Java Bit"><i class="fa fa-chevron-left"></i>Java Bit</a></div><div class="post-nav-prev post-nav-item"><a href=https://zstonec.github.io/post/markdown-syntax/ rel=prev title=Markdown语法手册>Markdown语法手册
+<i class="fa fa-chevron-right"></i></a></div></div><div id=wcomments></div></footer></article></section></div></div><div class=sidebar-toggle><div class=sidebar-toggle-line-wrap><span class="sidebar-toggle-line sidebar-toggle-line-first"></span><span class="sidebar-toggle-line sidebar-toggle-line-middle"></span><span class="sidebar-toggle-line sidebar-toggle-line-last"></span></div></div><aside id=sidebar class=sidebar><div class=sidebar-inner><section class="site-overview sidebar-panel sidebar-panel-active"><div class="site-author motion-element" itemprop=author itemscope itemtype=http://schema.org/Person><img class=site-author-image itemprop=image src=/img/avatar.png alt=小石头><p class=site-author-name itemprop=name>小石头</p><p class="site-description motion-element" itemprop=description>再平凡的人也有属于他自己的梦想!</p></div><nav class="site-state motion-element"><div class="site-state-item site-state-posts"><a href=/post/><span class=site-state-item-count>9</span>
+<span class=site-state-item-name>日志</span></a></div><div class="site-state-item site-state-categories"><a href=/categories/><span class=site-state-item-count>2</span>
+<span class=site-state-item-name>分类</span></a></div><div class="site-state-item site-state-tags"><a href=/tags/><span class=site-state-item-count>10</span>
+<span class=site-state-item-name>标签</span></a></div></nav><div class="links-of-author motion-element"><span class=links-of-author-item><a href=https://github.com/zstonec/ target=_blank title=GitHub><i class="fa fa-fw fa-github"></i>GitHub</a></span></div><div class="tagcloud-of-blogroll motion-element tagcloud-of-blogroll-inline"><div class=tagcloud-of-blogroll-title><i class="fa fa-fw fa-tags"></i>标签云</div><ul class=tagcloud-of-blogroll-list><li class=tagcloud-of-blogroll-item><a href=/tags/druid>Druid</a></li><li class=tagcloud-of-blogroll-item><a href=/tags/markdown>Markdown</a></li><li class=tagcloud-of-blogroll-item><a href=/tags/css>Css</a></li><li class=tagcloud-of-blogroll-item><a href=/tags/emoji>Emoji</a></li><li class=tagcloud-of-blogroll-item><a href=/tags/html>Html</a></li><li class=tagcloud-of-blogroll-item><a href=/tags/java>Java</a></li><li class=tagcloud-of-blogroll-item><a href=/tags/kafka>Kafka</a></li><li class=tagcloud-of-blogroll-item><a href=/tags/privacy>Privacy</a></li><li class=tagcloud-of-blogroll-item><a href=/tags/shortcodes>Shortcodes</a></li><li class=tagcloud-of-blogroll-item><a href=/tags/text>Text</a></li></ul></div></section></div></aside></div></main><footer id=footer class=footer><div class=footer-inner><div class=copyright><span class=copyright-year>&copy; 2021 - 2022</span>
+<span class=with-love><i class="fa fa-heart"></i></span><span class=copyright-author>风云小记</span></div><div class=vistor-info><script async src=//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js></script><span class=site-uv><i class="fa fa-user"></i><span class=busuanzi-value id=busuanzi_value_site_uv></span></span><span class=separator-line>/</span>
+<span class=site-pv><i class="fa fa-eye"></i><span class=busuanzi-value id=busuanzi_value_site_pv></span></span></div></div></footer><div class=back-to-top><i class="fa fa-arrow-up"></i><span id=scrollpercent><span>0</span>%</span></div></div><script type=text/javascript src=//cdn.bootcdn.net/ajax/libs/jquery/2.1.4/jquery.min.js></script><script src=//cdn.bootcdn.net/ajax/libs/imageviewer/0.1.0/viewer.min.js></script><script type=text/javascript src=/js/search.js></script><script type=text/javascript src=/js/affix.js></script><script type=text/javascript src=/js/scrollspy.js></script><script type=text/javascript>function getCntViewHeight(){var docHeight=$('#content').height(),winHeight=$(window).height(),cntViewHeight=(docHeight>winHeight)?(docHeight-winHeight):($(document).height()-winHeight);return cntViewHeight;}
+function getScrollbarWidth(){var $div=$('<div />').addClass('scrollbar-measure').prependTo('body');var div=$div[0];var scrollbarWidth=div.offsetWidth-div.clientWidth;$div.remove();return scrollbarWidth;}
+function registerBackTop(){var THRESHOLD=50;var $top=$('.back-to-top');$(window).on('scroll',function(){$top.toggleClass('back-to-top-on',window.pageYOffset>THRESHOLD);var scrollTop=$(window).scrollTop();var cntViewHeight=getCntViewHeight();var scrollPercent=(scrollTop)/(cntViewHeight);var scrollPercentRounded=Math.round(scrollPercent*100);var scrollPercentMaxed=(scrollPercentRounded>100)?100:scrollPercentRounded;$('#scrollpercent>span').html(scrollPercentMaxed);});$top.on('click',function(){$("html,body").animate({scrollTop:0,screenLeft:0,},800);});}
+function initScrollSpy(){var tocSelector='.post-toc';var $tocElement=$(tocSelector);var activeCurrentSelector='.active-current';$tocElement.on('activate.bs.scrollspy',function(){var $currentActiveElement=$(tocSelector+' .active').last();removeCurrentActiveClass();$currentActiveElement.addClass('active-current');}).on('clear.bs.scrollspy',removeCurrentActiveClass);$('body').scrollspy({target:tocSelector});function removeCurrentActiveClass(){$(tocSelector+' '+activeCurrentSelector).removeClass(activeCurrentSelector.substring(1));}}
+function initAffix(){var headerHeight=$('.header-inner').height();var footerOffset=parseInt($('.main').css('padding-bottom'),10);var sidebarTop=headerHeight+10;$('.sidebar-inner').affix({offset:{top:sidebarTop,bottom:footerOffset}});$(document).on('affixed.bs.affix',function(){updateTOCHeight(document.body.clientHeight-100);});}
+function initTOCDimension(){var updateTOCHeightTimer;$(window).on('resize',function(){updateTOCHeightTimer&&clearTimeout(updateTOCHeightTimer);updateTOCHeightTimer=setTimeout(function(){var tocWrapperHeight=document.body.clientHeight-100;updateTOCHeight(tocWrapperHeight);},0);});updateTOCHeight(document.body.clientHeight-100);var scrollbarWidth=getScrollbarWidth();$('.post-toc').css('width','calc(100% + '+scrollbarWidth+'px)');}
+function updateTOCHeight(height){height=height||'auto';$('.post-toc').css('max-height',height);}
+$(function(){var sidebarTop=$('.header-inner').height()+10;$('#sidebar').css({'margin-top':sidebarTop}).show();var headerHeight=$('.header-inner').height();var sidebarHeight=$('.sidebar-inner').height();var leftHeight=headerHeight+sidebarHeight+50;var contentHeight=$('.content-wrap').height();if(contentHeight<leftHeight){$('.content-wrap').css('height',leftHeight+50);}
+$('.site-nav-toggle').on('click',function(){var $siteNav=$('.site-nav');var $toggleLine=$('.toggle');var ON_CLASS_NAME='site-nav-on';var CLOSE_CLASS_NAME='toggle-close';var isSiteNavOn=$siteNav.hasClass(ON_CLASS_NAME);var animateAction=isSiteNavOn?'slideUp':'slideDown';var animateCallback=isSiteNavOn?'removeClass':'addClass';$siteNav.stop()[animateAction]('normal',function(){$siteNav[animateCallback](ON_CLASS_NAME);$toggleLine[animateCallback](CLOSE_CLASS_NAME);});});registerBackTop();initScrollSpy();initAffix();initTOCDimension();$('.post-body').viewer();$('.sidebar-nav-toc').click(function(){$(this).addClass('sidebar-nav-active');$(this).next().removeClass('sidebar-nav-active');$('.'+$(this).next().attr('data-target')).toggle(500);$('.'+$(this).attr('data-target')).toggle(500);});$('.sidebar-nav-overview').click(function(){$(this).addClass('sidebar-nav-active');$(this).prev().removeClass('sidebar-nav-active');$('.'+$(this).prev().attr('data-target')).toggle(500);$('.'+$(this).attr('data-target')).toggle(500);});});</script><script src=//cdn.jsdelivr.net/npm/@waline/client/dist/Waline.min.js></script><script type=text/javascript>new Waline({el:'#wcomments',visitor:true,placeholder:' 欢迎留下您的宝贵建议. ^_^ ',requiredFields:['nick','mail'],serverURL:"https:\/\/comment-api-gules.vercel.app\/",lang:"zh-cn"});</script><script>(function(){var bp=document.createElement('script');var curProtocol=window.location.protocol.split(':')[0];if(curProtocol==='https'){bp.src='https://zz.bdstatic.com/linksubmit/push.js';}
+else{bp.src='http://push.zhanzhang.baidu.com/push.js';}
+var s=document.getElementsByTagName("script")[0];s.parentNode.insertBefore(bp,s);})();</script></body></html>

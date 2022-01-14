@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><search><entry><title>Tranquility线程溢出问题排查</title><url>https://zstonec.github.io/post/tranquility-thread/</url><categories/><tags><tag>druid</tag></tags><content type="html"> 本文记录一次生产环境Tranquility线程溢出的问题。
+某天凌晨，突然收到报警，有Tranquility任务失败。查看druid peon节点日志，发现如下异常
+咦？看到java.lang.OutOfMemoryError，第一反应是内存不够了。可查看当前机器内存，显示内存很充足。监控也显示发生异常时内存没有太大波动。难道是线程数超出了系统限制？通过ps -xH | wc -l 命令看到当前系统中总共有18520个线程。逐个查看java进程的线程，发现其中一个Tranquility任务线程数为11088，另一个Tranquility线程数为3048。现在有两个问题要排查：1.系统允许的最大线程数是多少呢？2.为啥Tranquility任务使用了这么多线程。
+第一个问题:
+​ cat /proc/sys/kernel/threads-max 显示3094961。
+如果按照这个来，显然1万8还没有超过限制。通过跑测试case测试：
+https://github.com/jheusser/core-java-performance-examples/blob/ea9b9e3b0e8102e474ca82827ce9ad065d7b8d67/src/test/java/com/google/code/java/core/threads/MaxThreadsMain.java
+发现系统只能创建1.8万的线程。怎么回事？只能求助PE。PE排查了一下，给到了以下结论：
+​ cat /sys/fs/cgroup/pids/user.slice/user-9762.slice/pids.max 显示18923
+​ 原来是单个用户创建的线程数量是1.8万的限制。
+那剩下第二个问题：为啥Tranquility任务要创建这么多线程呢。首先看一下都有哪些线程，通过jstack命令打印当前线程，发现名称为Curator-ServiceCache-0的线程有1万多。因此怀疑代码中两种可能的问题：1.某些特定场景时会无限创建线程 2.可能是无用的线程没有释放。要定位问题，首先要定位问题发生在哪里。
+通过线程名称，判断与Curator的ServiceCache功能有关，全局搜了下Curator-ServiceCache，并没有找到。后来在这段代码中发现了端倪。
+跟踪发现，每次创建serviceCache时都会创建一个单线程的线程池。
+首先怀疑是Tranquility中有些逻辑会创建大量线程。跟踪代码发现，在两个地方会使用serviceCache。一个地方是com.metamx.tranquility.druid.IndexService#submit。创建索引任务的时候会在zk的 /tranquility/beams/xxx:overlord 中创建节点，记录当前任务的interval、分片、副本信息。第二个地方是com.metamx.tranquility.druid.CuratorTaskLocator#connect，发送消息到peon节点的时候。具体是哪里呢？因为线程名称中没有zk路径，不好判断。突然想到可以dump下堆内存，看看具体是哪里的serviceCache。
+执行jmap命令,dump内存：jmap -dump:format=b,file=pid.dump pid
+还好，只有2.7G。拉到本地用VisualVM打开。
+如图，可以看到是发送消息到peon节点时候用的serviceCache。这时候看到PathChildrenCache的状态都是closed的状态。奇怪，cache都已经Close了，为啥线程还在呢？带着这个问题，翻开源码我们可以看到。
+CloseableExecutorService默认shutdownOnClose是false，关闭cache的时候并不会shutdown线程。查看最新的Curator代码，发现这个问题已经被修复了(知道4.3.0版本才修复)。
+如果存在线程泄露，为什么之前一直没有问题呢？是不是之前一直靠gc来释放线程，如果没有gc掉，这些线程就会一直存在。为了验证这个问题，执行了下jmap -histo:live pid。第一次执行发现有4000多个Thread对象。第二次执行发现Thread对象只有300个左右。原因是第一次执行的时候触发了fullgc，无用的线程已经gc掉了。至此，问题根源已经定位明确，剩下的就是问题解决了。
+解决方案1：升级Curator到4.3.0，查资料发现Curator不支持zookeeper3.4.x了。会有比较大的兼容性风险。
+解决方案2：修改调用程序，显示传入ExecutorService。发现调用serviceCache的地方是在com.metamx的scala-util包里，改动的话还要用sbt重新打包，也比较麻烦。
+解决方案3：下载Curator 2.10.0源码，修改shutdownOnClose为true，重新打包。然后将Tranquility依赖的Curator排除干净，改为依赖自己打包的Curator。部署到线上之后，灰度效果如下。
+之前线上任务
+修改后重新部署的任务
+效果非常明显。</content></entry><entry><title>Kafka Consumer</title><url>https://zstonec.github.io/post/kafka-consumer/</url><categories/><tags><tag>KAFKA</tag></tags><content type="html"> 本文结合源码分析Kafka Consumer的逻辑，涉及再均衡等过程分析。
+引言 kafka是大数据处理常用的消息组件。本文着重分析consumer端消费消息的逻辑。首先，我们看看consumer的常见用法：
+Properties props = new Properties(); props.setProperty("bootstrap.servers", "localhost:9092"); props.setProperty("group.id", "test"); props.setProperty("enable.auto.commit", "true"); props.setProperty("auto.commit.interval.ms", "1000"); props.setProperty("key.deserializer", "org.apache.kafka.common.serialization.StringDeserializer"); props.setProperty("value.deserializer", "org.apache.kafka.common.serialization.StringDeserializer"); KafkaConsumer&lt;String, String> consumer = new KafkaConsumer&lt;>(props); consumer.subscribe(Arrays.asList("foo", "bar")); while (true) { ConsumerRecords&lt;String, String> records = consumer.poll(Duration.ofMillis(100)); for (ConsumerRecord&lt;String, String> record : records) System.out.printf("offset = %d, key = %s, value = %s%n", record.offset(), record.key(), record.value()); } 一般是在一个循环中消费、处理消息。除此之前consumer担负的职责还有offset提交、rebalance。
+consumer端的重要组件简介 KafkaConsumer
+最重要的入口类，它会调用Fetcher、ConsumerCoordinator、ConsumerNetworkClient等组件实现订阅、消息拉取、rebalance等功能
+ConsumerCoordinator
+负责与broker端的GroupCoordinator通信，维持与GroupCoordinator的心跳，reblance。
+Fetcher
+负责消息拉取。拉取的方式是周期性的向订阅的partition的leader发送FetchRequest，然后获取响应，将响应中的消息放入队列，从队列中获取可用的消息。
+ConsumerNetworkClient
+负责与broker的网络通信，采用了java nio。
+SubscriptionState
+维护订阅的分区信息
+ConsumerMetadata
+维护kafka集群的信息，包括broker节点、controller、partition信息等
+KafkaConsumer分析 构造函数
+读取配置 创建空的SubscriptionState 创建ConsumerMetadata 创建NetworkClient 从配置读取并初始化assignors，默认为RangeAssignor 实例化ConsumerCoordinator 实例化Fetcher subscribe（订阅）方法分析
+public void subscribe(Collection&lt;String> topics, ConsumerRebalanceListener listener) { // 1. 通过比较线程ID，确保在单线程中 acquireAndEnsureOpen(); try { // 2. 如果没有设置groupId（独立消费者可以不设置groupId），抛出异常 maybeThrowInvalidGroupIdException(); if (topics == null) throw new IllegalArgumentException("Topic collection to subscribe to cannot be null"); if (topics.isEmpty()) { // treat subscribing to empty topic list as the same as unsubscribing this.unsubscribe(); } else { for (String topic : topics) { if (topic == null || topic.trim().isEmpty()) throw new IllegalArgumentException("Topic collection to subscribe to cannot contain null or empty topic"); } throwIfNoAssignorsConfigured(); // 3. 清空不属于这些topic的缓存数据 fetcher.clearBufferedDataForUnassignedTopics(topics); log.info("Subscribed to topic(s): {}", Utils.join(topics, ", ")); // 4. 设置SubscriptionState的rebalanceListener、subscriptionType、subscription(订阅的topic) if (this.subscriptions.subscribe(new HashSet&lt;>(topics), listener)) // 5. 如果订阅的topic发生了改变，更新metadata状态，标识需要重新获取metadata metadata.requestUpdateForNewTopics(); } } finally { // 6. 释放线程的引用 release(); } } poll（轮询）方法分析
+public ConsumerRecords&lt;K, V> poll(final Duration timeout) { return poll(time.timer(timeout), true); }
+这是我们获取消息的主方法，最终会调用下面的方法
+private ConsumerRecords&lt;K, V> poll(final Timer timer, final boolean includeMetadataInTimeout) { acquireAndEnsureOpen(); try { this.kafkaConsumerMetrics.recordPollStart(timer.currentTimeMs()); // 1.检查是否设置了订阅信息 if (this.subscriptions.hasNoSubscriptionOrUserAssignment()) { throw new IllegalStateException("Consumer is not subscribed to any topics or assigned any partitions"); } do { // 2. 检查是否wakeup，如果是wakeup的话，重置标志位，抛出异常 client.maybeTriggerWakeup(); // 3. 设置metadata if (includeMetadataInTimeout) { // try to update assignment metadata BUT do not need to block on the timer for join group updateAssignmentMetadataIfNeeded(timer, false); } else { while (!updateAssignmentMetadataIfNeeded(time.timer(Long.MAX_VALUE), true)) { log.warn("Still waiting for metadata"); } } // 4. 获取消息，消息是按照分区分组的 final Map&lt;TopicPartition, List&lt;ConsumerRecord&lt;K, V>>> records = pollForFetches(timer); if (!records.isEmpty()) { if (fetcher.sendFetches() > 0 || client.hasPendingRequests()) { client.transmitSends(); } return this.interceptors.onConsume(new ConsumerRecords&lt;>(records)); } } while (timer.notExpired()); // 5. 直到获取到了消息或者超时 return ConsumerRecords.empty(); } finally { release(); this.kafkaConsumerMetrics.recordPollEnd(timer.currentTimeMs()); } } ConsumerCoordinator分析 ConsumerCoordinator继承了AbstractCoordinator
+在KafkaConsumer的poll方法中，我们看到每次轮询都会先调用如下的方法
+boolean updateAssignmentMetadataIfNeeded(final Timer timer, final boolean waitForJoinGroup) { if (coordinator != null &amp;&amp; !coordinator.poll(timer, waitForJoinGroup)) { return false; } return updateFetchPositions(timer); } 这个方法是调用了ConsumerCoordinator中的poll方法
+public boolean poll(Timer timer, boolean waitForJoinGroup) { // 1. 判断是否更新元数据快照 maybeUpdateSubscriptionMetadata(); // 2. 之前已经完成的commit，触发callback invokeCompletedOffsetCommitCallbacks(); // 判断订阅类型是 AUTO_TOPICS, AUTO_PATTERN if (subscriptions.hasAutoAssignedPartitions()) { if (protocol == null) { throw new IllegalStateException("User configured " + ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG + " to empty while trying to subscribe for group protocol to auto assign partitions"); } pollHeartbeat(timer.currentTimeMs()); // 初始化的时候心跳线程为空，什么都不做 if (coordinatorUnknown() &amp;&amp; !ensureCoordinatorReady(timer)) { // 确保获取coordinator return false; } // 判断是否需要joinGroup 或者 等待joinGroup完成(pending) if (rejoinNeededOrPending()) { ... // 等待joinGroup完成，会启动心跳线程、开启rebalance // if not wait for join group, we would just use a timer of 0 if (!ensureActiveGroup(waitForJoinGroup ? timer : time.timer(0L))) { timer.update(time.milliseconds()); return false; } } } else { ... } // 自动提交offset maybeAutoCommitOffsetsAsync(timer.currentTimeMs()); return true; } 总结下ConsumerCoordinator中poll方法的流程
+更新metadataSnapshot，确保快照最新 触发已经完成的commitOffset的回调 检查心跳线程是否有异常，更新心跳线程的当前时间，如果心跳时间到了，唤醒心跳线程。（初次poll的时候心跳线程还不存在，所以什么都不会做）。 检查group coordinator是否ready。 判断是否需要joinGroup或者等待joinGroup完成（pending状态）。如果是的话，等待joinGroup完成 可能自动提交offset 下面具体分析下其中几个有意思的点
+检查groupCoordinator是否ready是否ready的流程如下： 如果groupCoordinator出现异常，一直不ready，则每次轮询都会阻塞至超时，从而影响正常消息消费。
+rejoinNeededOrPending的流程如下： 我们看下ensureActiveGroup的代码
+boolean ensureActiveGroup(final Timer timer) { if (!ensureCoordinatorReady(timer)) { return false; } // start心跳线程 startHeartbeatThreadIfNeeded(); // joinGroup return joinGroupIfNeeded(timer); } 主要是调用joinGroupIfNeeded方法，joinGroupIfNeeded的流程如下：
+我们总结一下memberState的状态转移图
+其中有个地方需要注意，当心跳线程发生sessionTimeout时，会标记groupCoordinator未知，阻塞当前消费。groupCoordinator识别到某个member sessionTimeout时，会将其移除。同时将自身状态变更为PreparingRebalance。收到其他member的心跳时，会返回错误 REBALANCE_IN_PROGRESS。这些member在下次轮询时就会触发reblance过程。
+注意事项 consumer的主要逻辑为获取消息+处理消息。如果处理消息耗时较大，需要避免将处理消息的逻辑放在主线程中。放在主线程中可能导致两次轮询间隔超过max.poll.interval.ms，触发reblance。可以参考这篇博客改为异步线程处理的方式： https://www.cnblogs.com/huxi2b/p/13668061.html
+总结 本文分析基于kafka2.7，从client端源码角度分析了订阅、轮询、再均衡等情形。如有错误，欢迎指出和交流。</content></entry><entry><title>Java Bit</title><url>https://zstonec.github.io/post/java-bit/</url><categories/><tags><tag>JAVA</tag></tags><content type="html"> 本文主要介绍JAVA中的字节相关知识。
+bit、byte、world bit (位) bit电脑记忆体中最小的单位，在二进位电脑系统中，每一bit可以代表0或1的数位讯号。所以它能表示的数字范围就是0 ~ 1。 byte (字节) 一个byte由8bit组成，所以理论上一个byte能表示的数据范围是0 ~ 255。 word (字) 一个word由2byte组成，所以理论上一个word能表示的数据范围是0 ~ 65535。 32 位与 64 位操作系统 一般计算机设备上，CPU 主要有 32 位和 64 位（当然，单片机有 8 位和 16 位），32 位 CPU 能够寻址的范围是 4 GB。所以过去的电脑设备内存最高一般只能到达 4 GB。后来，随着芯片技术的发展，越来越多的机器采用了 64 位 CPU。这使得机器的最大内存可以为 16 GB。
+那么好，我们再来谈谈 32 位操作系统与 64 位操作系统。实际上它们分别是针对 CPU 类型设计的软件系统。
+32 bit 是 4 byte。通常一条 CPU 指令是 4 byte。在 32 位操作系统上，如果一条 CPU 指令是 4 byte，那么 CPU 执行一次能够读取 32 bit 内容，所以一个指令周期内就能够完成指令，如果一条 CPU 指令是 8 byte 的话，那么 32 位操作系统就需要通过 2 个指令周期才能完成指令的读取，而对应的 64 位操作系统因为一次能够读取 64 bit 内容，所以它在一个指令周期就能够读取指令。所以，理论上，64 位的操作系统是要比 32 位操作系统要快 1 倍。
+但还有几个需要大家注意的地方是：
+64 位 CPU 机器可以安装 32 位操作系统，但效率自然跟 32 位操作系统一样。 32 位 CPU 机器也可以安装 64 位操作系统。 64 位 CPU 机器安装 64 位操作系统才最有效率，但跟软件优化也有关系。 不同的操作系统平台，给 C/C++ 基本数据类型变量分配的字节是不一样的。
+32位编译器：
+char ：1个字节 char*（即指针变量）: 4个字节（32位的寻址空间是2^32, 即32个bit，也就是4个字节。同理64位编译器） short int : 2个字节 int： 4个字节 unsigned int : 4个字节 float: 4个字节 double: 8个字节 long: 4个字节 long long: 8个字节 unsigned long: 4个字节 64位编译器：
+char ：1个字节 char*(即指针变量): 8个字节 short int : 2个字节 int： 4个字节 unsigned int : 4个字节 float: 4个字节 double: 8个字节 long: 8个字节 long long: 8个字节 unsigned long: 8个字节 上面讲的是 C/C++ 在不同平台上的字节长度差别，但是对于 Java 而言，由于 Java 是跨平台语言，所以 JVM 表现下的基础数据字节长度其实都是一致的。
+byte：1 个字节。 short：2 个字节。 char：2 个字节。 int：4 个字节。 long：8 个字节。 float：4 个字节。 double：8 个字节。 boolean：boolean属于布尔类型，在存储的时候不使用字节，仅仅使用 1 位来存储，范围仅仅为0和1，其字面量为true和false。 我们可以看到 Java 与 C/C++ 的基本数据类型字节长度有些不一致，所以涉及到网络通信交互或者是 JNI 开发时，数据的转换有时需要考虑下基础的字节长度。
+本篇文章的主要内容是 Java 中的位操作，所以基础数据长度也是以 Java 中定义的为准。
+原码、反码、补码 我们已经知道了一个 int 型数值是 4 个字节。每个字节有 8 位。但对于一个 int 或者其它整数类型如 （long）的数值而言还要注意的是，它的最高位是符号位。
+最高位为0表示正数。
+最高位为1表示负数
+原码 将一个数字转换成二进制就是这个数值的原码。
+int a = 5; //原码 0000 0000 0000 0101 int b = -3; //原码 1000 0000 0000 0011 反码 分两种情况：正数和负数
+正数 正数的反码就是原码。
+负数 负数的反码是在原码的基础上，符号位不变，其它位都取反。
+5 的原码：0000 0000 0000 0101 5 的反码：0000 0000 0000 0101 -3 的原码：1000 0000 0000 0011 -3 的反码：1111 1111 1111 1100 补码 仍然分正数和负数两种情况
+正数 正数的补码就是原码。
+负数 负数的补码在反码的基础上加1。
+5 的反码：0000 0000 0000 0101 5 的补码：0000 0000 0000 0101 -3 的反码：1111 1111 1111 1100 -3 的补码：1111 1111 1111 1101 计算机在进行数值运算的时候，是通过补码表示每个数值的。
+比如
+5 - 3 = 5 + ( -3 ) 相当于
+0000 0000 0000 0101 + 1111 1111 1111 1101 = 1 0000 0000 0000 0010 运算符(&amp;、|、~、^、&laquo;、&raquo;、&raquo;>) 位运算符包含与运算符、或运算符、取反运算符、异或运算符、左移运算符和右移运算符。在下面的内容中，我将会一一讲解。
+需要注意的是，下面测试用的数据都是 int 类型，int 类型是 4 个字节长度，但是为了方便说明示例中用的数值我都用 1 个字节表示。希望不会给大家造成困扰。
+与运算符(&amp;) 规则 与运算时，进行运算的两个数，从最低位到最高位，一一对应。如果某 bit 的两个数值对应的值都是 1，则结果值相应的 bit 就是 1，否则为 0.
+0 &amp; 0 = 0 0 &amp; 1 = 0 1 &amp; 1 = 1 3 &amp; 5 = 1 这是因为
+0000 0011 &amp; 0000 0101 = 0000 0001 按照规则，将两个数值按照低位到高位一一对齐运算，因为只有第 0 位都为 1，所以计算结果为 1.
+或运算符(|) 规则 或运算时，进行运算的两个数，从最低位到最高位，一一对应。如果某 bit 的两个数值对应的值只要 1 个为 1，则结果值相应的 bit 就是 1，否则为 0。
+0 | 0 = 0 0 | 1 = 1 1 | 1 = 1 3 | 5 = 7 这是因为
+0000 0011 | 0000 0101 = 0000 0111 取反运算符（~） 规则 对操作数的每一位进行操作，1 变成 0，0 变成 1。
+~5 => 0000 0101 ~ => 1111 1010 异或运算符(^) 规则 两个操作数进行异或时，对于同一位上，如果数值相同则为 0，数值不同则为 1。
+1 ^ 0 = 1 1 ^ 1 = 0 0 ^ 0 = 0 3 ^ 5 = 6,这是因为
+0000 0011 | 0000 0101 = 0000 0110 值得注意的是 3 ^ 5 = 6,而 6 ^ 5 = 3
+0000 0110 | 0000 0101 = 0000 0011 针对这个特性，我们可以将异或运算作为一个简单的数据加密的形式。比如，将一个mp4文件所有数值与一个种子数值进行异或得到加密后的数据，解密的时候再将数据与种子数值进行异或一次就可以了。
+所以说异或运算可以作为简单的加解密运算算法。
+左移运算符(&laquo;) 规则 a &laquo; b 将数值 a 的二进制数值从 0 位算起到第 b - 1 位，整体向左方向移动 b 位，低位空出来的位补数值 0。注意：符号位也会移动。
+5 &lt;&lt; 1 ===> 1000 0000 0000 0101 &lt;&lt; 1 = 1000 0000 0000 1010 = 10 7 &lt;&lt; 2 ===> 1000 0000 0000 0111 &lt;&lt; 2 = 1000 0000 0001 1100 = 28 9 &lt;&lt; 3 ===> 1000 0000 0000 1001 &lt;&lt; 3 = 1000 0000 0100 1000 = 72 11 &lt;&lt; 2 ===> 1000 0000 0000 1011 &lt;&lt; 2 = 1000 0000 0010 1100 = 44 很明显就可以看出 a &laquo; b = a * (2 ^ b)
+如果某个数值左移 n 位，就相当于这个数值乘以 2 ^ n（前提是没有数据溢出）。
+先随便定义一个int类型的数int，十进制的value = 733183670，转换成二进制在计算机中的表示如下：
+value &laquo; 1，左移1位
+左移1位后换算成十进制的值为：1466367340，刚好是733183670的两倍，有些人在乘2操作时喜欢用左移运算符来替代。
+value &laquo; 8，左移8位看一下：
+左移8位后变成了十进制的值为：-1283541504，移动8位后，由于首位变成了1，也就是说成了负数，在使用中要考虑变成负数的情况。
+根据这个规则，左移32位后，右边补上32个0值是不是就变成了十进制的0了？答案是NO，当int类型进行左移操作时，左移位数大于等于32位操作时，会先求余（%）后再进行左移操作。也就是说左移32位相当于不进行移位操作，左移40位相当于左移8位（40%32=8）。当long类型进行左移操作时，long类型在二进制中的体现是64位的，因此求余操作的基数也变成了64，也就是说左移64位相当于没有移位，左移72位相当于左移8位（72%64=8），写一段代码来测试一下:
+int intValue = 733183670;//随意写一个数 System.out.println("intValue：" + (intValue));//打印intValue System.out.println("intValue左移1位：" + (intValue &lt;&lt; 1));//左移1位 System.out.println("intValue左移8位：" + (intValue &lt;&lt; 8));//左移8位 //当int类型左移位数大于等于32位操作时，会先求余后再进行移位操作 System.out.println("intValue左移32位：" + (intValue &lt;&lt; 32));//求余为32%32=0，相当于左移0位（不移位） System.out.println("intValue左移40位：" + (intValue &lt;&lt; 40));//求余为40%32=8，相当于左移8位 System.out.println("intValue左移64位：" + (intValue &lt;&lt; 64));//求余为64%32=0，相当于左移0位（不移位） long longValue = 733183670L; System.out.println("longValue：" + (longValue));//打印longValue System.out.println("longValue左移1位：" + (longValue &lt;&lt; 1));//左移1位 System.out.println("longValue左移8位：" + (longValue &lt;&lt; 8));//左移8位 //当long类型左移位数大于等于64位操作时，会先求余后再进行移位操作 System.out.println("longValue左移64位：" + (longValue &lt;&lt; 64));//求余为64%64=0，相当于左移0位（不移位） System.out.println("longValue左移72位：" + (longValue &lt;&lt; 72));//求余为72%64=8，相当于左移8位 System.out.println("longValue左移128位：" + (longValue &lt;&lt; 128));//求余为128%64=0，相当于左移0位（不移位） 由于double，float在二进制中的表现比较特殊，因此不能来进行移位操作，报错，编译不过，如下图：
+注意：其它几种整形byte，short移位前会先转换为int类型（32位）再进行移位，这里就不写代码测试了，大家有兴趣可自行测试。
+综上所述：左移 &laquo; 其实很简单，也就是说丢弃左边指定位数，右边补0。
+右移运算符(&raquo;) 规则 a &raquo; b 将数值 a 的二进制数值从 0 位算起到第 b - 1 位，整体向右方向移动 b 位，高位空出来的补符号位。
+5 >> 1 ===> 1000 0000 0000 0101 >> 1 = 1000 0000 0000 0010 = 2 7 >> 2 ===> 1000 0000 0000 0111 >> 2 = 1000 0000 0000 0001 = 1 9 >> 3 ===> 1000 0000 0000 1001 >> 3 = 1000 0000 0000 0001 = 1 11 >> 2 ===> 1000 0000 0000 1011 >> 2 = 1000 0000 0000 0010 = 2 大家发现什么规律没有？a &raquo; b = a / ( 2 ^ b ) ,所以 5 &raquo; 1= 5 / 2 = 2,11 &raquo; 2 = 11 / 4 = 2。
+如果某个数值右移 n 位，就相当于拿这个数值去除以 2 的 n 次幂。
+value &raquo; 1，右移1位
+右移1位后换算成十进制的值为：366591835，刚好是733183670的1半， 有些人在除2操作时喜欢用右移运算符来替代
+value &raquo; 8，右移8位看一下
+写一段代码测试一下
+int intValue = 733183670;//随意写一个数 System.out.println("intValue：" + (intValue));//打印intValue System.out.println("intValue右移1位：" + (intValue >> 1));//右移1位 System.out.println("intValue右移8位：" + (intValue >> 8));//右移8位 //当int类型右移位数大于等于32位操作时，会先求余后再进行移位操作 System.out.println("intValue右移32位：" + (intValue >> 32));//求余为32%32=0，相当于右移0位（不移位） System.out.println("intValue右移40位：" + (intValue >> 40));//求余为40%32=8，相当于右移8位 System.out.println("intValue右移64位：" + (intValue >> 64));//求余为64%32=0，相当于右移0位（不移位） long longValue = 733183670L; System.out.println("longValue：" + (longValue));//打印longValue System.out.println("longValue右移1位：" + (longValue >> 1));//右移1位 System.out.println("longValue右移8位：" + (longValue >> 8));//右移8位 //当long类型右移位数大于等于64位操作时，会先求余后再进行移位操作 System.out.println("longValue右移64位：" + (longValue >> 64));//求余为64%64=0，相当于右移0位（不移位） System.out.println("longValue右移72位：" + (longValue >> 72));//求余为72%64=8，相当于右移8位 System.out.println("longValue右移128位：" + (longValue >> 128));//求余为128%64=0，相当于右移0位（不移位） 和左移一样，int类型移位大于等于32位时，long类型大于等于64位时，会先做求余处理再位移处理，byte，short移位前会先转换为int类型（32位）再进行移位。以上是正数的位移，我们再来看看负数的右移运算，如图，负数intValue：-733183670的二进制表现如下图：
+右移8位，intValue &raquo; 8
+综上所述：右移运算符&raquo;的运算规则也很简单，丢弃右边指定位数，左边补上符号位。
+无符号右移运算符(&raquo;>) 无符号右移运算符&raquo;>和右移运算符&raquo;是一样的，只不过右移时左边是补上符号位，而无符号右移运算符是补上0，也就是说，对于正数移位来说等同于：&raquo;，负数通过此移位运算符能移位成正数。以-733183670&raquo;>8为例来画一下图:
+无符号右移运算符&raquo;的运算规则也很简单，丢弃右边指定位数，左边补上0。
+总结 箭头朝哪边，就往哪边移位 左移操作相当于乘2，右移相当于除2，不全是 左移操作可能改变正负，因为符号位会被移走，新符号位不一定和以前一样 右移操作不改变符号，因为左边填充的是符号位 无符号右移会把负数变成正数 没有无符号左移 位移超过JAVA基本类型的位数后，等同于位移取模后的位数 问题：位移负数位 官方文档：
+https://docs.oracle.com/javase/specs/jls/se10/html/jls-15.html#jls-15.19</content></entry><entry><title>Druid Segment</title><url>https://zstonec.github.io/post/druid-segment/</url><categories/><tags><tag>druid</tag></tags><content type="html"> 本文从druid存储文件入手，由下而上，分析segment的存储结构，力求详尽。
+druid segment存储目录 druid的segment存储在hdfs中，路径如下：
+/user/xxx/druid-test/segments/datasource-demo/20210128T070000.000Z_20210128T080000.000Z/2021-01-28T19_43_30.730Z/9_index.zip 存储路径格式为
+/basePath/dataSource/start_end/version/shardNum_index.zip 包含的文件 其中zip文件解压后的内容如下：
+meta.smoosh factory.json 00000.smoosh version.bin factory.json
+{"type":"mMapSegmentFactory"} version.bin
+二进制文件. 一个4byte的整数值作为版本号。比如对于v9版本的segment，版本号是：0x0,0x0,0x0,0x9 00000.smoosh
+二进制数据文件 meta.smoosh
+内容如下
+v1,2147483647,1 __time,0,0,180257 city,0,180257,355650 country,0,103343702,103367399 province,0,110937398,110961158 click,0,32192346,32700262 exposure,0,30034665,32192346 count,0,896163,3122006 metadata.drd,0,3122006,31219991 index.drd,0,31219991,61219991 第一行的格式为 | segment版本号 | xxxxx.smoosh文件最大值（默认是2G） | xxxxx.smoosh文件个数| | ---- | ---- |---- | |v1|2147483647|1| 后面行的格式为 | column | smooshId | startPos | endPos| | ---- | ---- |---- |----| |__time|0|0|180257| | city |0|180257|355650| 我们容易想到，可以根据meta.smoosh文件分析每列占用空间大小 | column |size | | ---- | ---- | |`city`|46852226| |`metadata.drd`|3836| |`index.drd`|2634| segment逻辑结构 Druid的列有三种基本类型：Timestamp类型，Dimension类型和Metric类型
+Timestamp列和Metric列比较简单，他们在实现中被存储为通过lz4压缩的整型或浮点数组。当一个查询需要访问某列数据时，只需要解压缩这些列，然后读取出这些列的数据，然后执行预定义的聚合操作。对于查询过程中不需要的列，Druid会直接跳过对这些列数据的访问。
+Dimension列由于要实现filter和group-by操作，它的实现有些不同，dimension列包行下列三种数据结构：
+一个字典：将值从字符串（所有的dimension列的数值都被当做字符串处理）映射到整数id。 一个值的列表（正排数据）：把列中的数值通过字典编码以后，将数字id存储在列表里面。 一个bitmap倒排索引：对于列里面的每个不同的值，都对应存储为一个bitmap，用来表示哪一行数据包含该值。 为什么我们需要这三种数据结构呢？通过字典将字符串映射成数字id，数字id通常比字符串更小，因此可以被更紧凑的存储。第三点中的bitmap，通常被称为倒排索引，用于支持快速的过滤操作（bitmap对AND和OR操作的速度非常快）。最后，第二点中的值列表将用于支持group by和topN查询，而普通的查询只需要根据filter出来的行去来聚合相应的metirc就可以了，而不需要访问上述2中的值列表。
+1.编码了列值的字典： { 'Justin Bieber': 0, 'Ke$ha': 1 } 2.列值数据（正排）： [0, 0, 1, 1](第一个和第二个0代表第一，二行数据编码，即上述字典中的'Justin BieBer'，第三个和第四个代表第三四行数据，即上述字典中的'Ke$ha') 3.Bitmaps：字典中的每个值对应一个bitmap value='Justin Bieber': [1, 1, 0, 0] value='Ke$ha': [0, 0, 1, 1] 注意bitmap跟其他两种数据结构不同，其他两种数据结构都是跟随数据量的增长而线性增长的（最差情况下），而bitmap的大小=数据的总行数*列中值的种类数（也就是字典的size）。这就意味着如果值得的种类很多，那么bitmap中为1的数量将会非常稀疏，这种情况下bitmap有可能被大幅压缩。Druid针对这种情况，采用了特殊的压缩算法，比如roaring bitmap压缩算法。
+如果datasource使用了多值列，那么segment里面的数据结构就稍微有些不同。让我们对上面例子中的数据稍微做一下修改，来演示多之列的情况。假设上述表格中的第二行的page列，同时被标注为Ke$ha和Justin Bieber，这种情况下，上面的三种数据结构如下图所示：
+1.编码了列值的字典： { 'Justin Bieber': 0, 'Ke$ha': 1 } 2.列值数据（正排）： [0, [0,1], &lt;-------（多个值） 1, 1](第一个和第二个0代表第一，二行数据编码，即上述字典中的'Justin BieBer'，第三个和第四个代表第三四行数据，即上述字典中的'Ke$ha') 3.Bitmaps：字典中的每个值对应一个bitmap value='Justin Bieber': [1, 1, 0, 0] value='Ke$ha': [0, 1, 1, 1] ^ | | 多值列在多个value中有多个不为0的标识 Segment的分区（Sharding）
+对于有些datasource来说，同一时间区间之内可能存在多个segment。这些segment构成了该时间区间的一个block。根据shardspec配置有两种类型，其中之一要求druid只能在block里面的segment都ready的情况下才能提供查询。也就是说，如果有下面3个segment:
+sampleData_2011-01-01T02:00:00:00Z_2011-01-01T03:00:00:00Z_v1_0 sampleData_2011-01-01T02:00:00:00Z_2011-01-01T03:00:00:00Z_v1_1 sampleData_2011-01-01T02:00:00:00Z_2011-01-01T03:00:00:00Z_v1_2 所有的这三个segment必须都被加载以后才能提供查询。
+但是当使用线性分片配置时，druid并不要求所有的segment都ready时才能提供查询。比如，在使用线性分片配置时，当你的实时数据导入模块创建了3个segment，如果只有两个segment被加载，druid将只返回在这两个segment上的查询结果。
+druid的索引类型 IncrementalIndex - IncrementalIndexStorageAdapter QueryableIndex - QueryableIndexStorageAdapter segemt加载过程 SegmentLoadDropHandler 对应代码实现SmooshedFileMapper</content></entry><entry><title>关于我</title><url>https://zstonec.github.io/about.html</url><categories/><tags/><content type="html"> 这个人很懒，还没有介绍。</content></entry><entry><title>Markdown语法手册</title><url>https://zstonec.github.io/post/markdown-syntax/</url><categories><category>themes</category><category>syntax</category></categories><tags><tag>markdown</tag><tag>css</tag><tag>html</tag></tags><content type="html"> 本文提供了一个可以在Hugo内容文件中使用的基本Markdown语法示例，还展示了基本HTML元素在Hugo主题中是否使用CSS装饰。
+Headings The following HTML &lt;h1>—&lt;h6> elements represent six levels of section headings. &lt;h1> is the highest section level while &lt;h6> is the lowest.
+H1 H2 H3 H4 H5 H6 Paragraph Xerum, quo qui aut unt expliquam qui dolut labo. Aque venitatiusda cum, voluptionse latur sitiae dolessi aut parist aut dollo enim qui voluptate ma dolestendit peritin re plis aut quas inctum laceat est volestemque commosa as cus endigna tectur, offic to cor sequas etum rerum idem sintibus eiur? Quianimin porecus evelectur, cum que nis nust voloribus ratem aut omnimi, sitatur? Quiatem. Nam, omnis sum am facea corem alique molestrunt et eos evelece arcillit ut aut eos eos nus, sin conecerem erum fuga. Ri oditatquam, ad quibus unda veliamenimin cusam et facea ipsamus es exerum sitate dolores editium rerore eost, temped molorro ratiae volorro te reribus dolorer sperchicium faceata tiustia prat.
+Itatur? Quiatae cullecum rem ent aut odis in re eossequodi nonsequ idebis ne sapicia is sinveli squiatum, core et que aut hariosam ex eat.
+Blockquotes The blockquote element represents content that is quoted from another source, optionally with a citation which must be within a footer or cite element, and optionally with in-line changes such as annotations and abbreviations.
+Blockquote without attribution Tiam, ad mint andaepu dandae nostion secatur sequo quae. Note that you can use Markdown syntax within a blockquote.
+Blockquote with attribution Don&rsquo;t communicate by sharing memory, share memory by communicating.— Rob Pike1 Tables Tables aren&rsquo;t part of the core Markdown spec, but Hugo supports supports them out-of-the-box.
+Name Age Bob 27 Alice 23 Inline Markdown within tables Italics Bold Code italics bold code Code Blocks Code block with backticks &lt;!doctype html> &lt;html lang="en"> &lt;head> &lt;meta charset="utf-8"> &lt;title>Example HTML5 Document&lt;/title> &lt;/head> &lt;body> &lt;p>Test&lt;/p> &lt;/body> &lt;/html> Code block indented with four spaces &lt;!doctype html> &lt;html lang="en"> &lt;head> &lt;meta charset="utf-8"> &lt;title>Example HTML5 Document&lt;/title> &lt;/head> &lt;body> &lt;p>Test&lt;/p> &lt;/body> &lt;/html> Code block with Hugo&rsquo;s internal highlight shortcode &lt;!doctype html> &lt;html lang="en"> &lt;head> &lt;meta charset="utf-8"> &lt;title>Example HTML5 Document&lt;/title> &lt;/head> &lt;body> &lt;p>Test&lt;/p> &lt;/body> &lt;/html> List Types Ordered List First item Second item Third item Unordered List List item Another item And another item Nested list Fruit Apple Orange Banana Dairy Milk Cheese Other Elements — abbr, sub, sup, kbd, mark GIFis a bitmap image format.
+H2O
+Xn+ Yn= ZnPress CTRL+ALT+Deleteto end the session.
+Most salamandersare nocturnal, and hunt for insects, worms, and other small creatures.
+The above quote is excerpted from Rob Pike&rsquo;s talk during Gopherfest, November 18, 2015. &#8617;&#xfe0e;</content></entry><entry><title>富文本内容测试</title><url>https://zstonec.github.io/post/rich-content/</url><categories/><tags><tag>shortcodes</tag><tag>privacy</tag></tags><content type="html"> Hugo 雨果附带几个[内置的短码](https://gohugo.io/content-management/shortcodes/ use-hugos-built-in-shortcodes)内容丰富,以及隐私配置和一组简单的短码,使静态和no-JS版本的各种社会媒体嵌入。
+YouTube Privacy Enhanced Shortcode Twitter Simple Shortcode .twitter-tweet { font: 14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Oxygen-Sans,Ubuntu,Cantarell,"Helvetica Neue",sans-serif; border-left: 4px solid #2b7bb9; padding-left: 1.5em; color: #555; } .twitter-tweet a { color: #2b7bb9; text-decoration: none; } blockquote.twitter-tweet a:hover, blockquote.twitter-tweet a:focus { text-decoration: underline; } “In addition to being more logical, asymmetry has the advantage that its complete appearance is far more optically effective than symmetry.”
+— Jan Tschichold pic.twitter.com/gcv7SrhvJb
+&mdash; Graphic Design History (@DesignReviewed) January 17, 2019 Vimeo Simple Shortcode .__h_video { position: relative; padding-bottom: 56.23%; height: 0; overflow: hidden; width: 100%; background: #000; } .__h_video img { width: 100%; height: auto; color: #000; } .__h_video .play { height: 72px; width: 72px; left: 50%; top: 50%; margin-left: -36px; margin-top: -36px; position: absolute; cursor: pointer; }</content></entry><entry><title>占位符文本显示</title><url>https://zstonec.github.io/post/placeholder-text/</url><categories/><tags><tag>markdown</tag><tag>text</tag></tags><content type="html"> 你对我的心有偏见。我向您保证，我们的生活将不会受到影响，我们的生活将会受到影响。你说你现在住在医院里，因为你的眼睛是透明的，你的眼睛是光明的，你的眼睛是光明的!
+Exierant elisi ambit vivere dedere Duce pollice Eris modo Spargitque ferrea quos palude Rursus nulli murmur; hastile inridet ut ab gravi sententia! Nomine potitus silentia flumen, sustinet placuit petis in dilapsa erat sunt. Atria tractus malis.
+Comas hunc haec pietate fetum procerum dixit Post torum vates letum Tiresia Flumen querellas Arcanaque montibus omnes Quidem et Vagus elidunt The Van de Graaf Canon
+Mane refeci capiebant unda mulcebat Victa caducifer, malo vulnere contra dicere aurato, ludit regale, voca! Retorsit colit est profanae esse virescere furit nec; iaculi matertera et visa est, viribus. Divesque creatis, tecta novat collumque vulnus est, parvas. Faces illo pepulere tempus adest. Tendit flamma, ab opes virum sustinet, sidus sequendo urbis.
+Iubar proles corpore raptos vero auctor imperium; sed et huic: manus caeli Lelegas tu lux. Verbis obstitit intus oblectamina fixis linguisque ausus sperare Echionides cornuaque tenent clausit possit. Omnia putatur. Praeteritae refert ausus; ferebant e primus lora nutat, vici quae mea ipse. Et iter nil spectatae vulnus haerentia iuste et exercebat, sui et.
+Eurytus Hector, materna ipsumque ut Politen, nec, nate, ignari, vernum cohaesit sequitur. Vel mitis temploque vocatus, inque alis, oculos nomen non silvis corpore coniunx ne displicet illa. Crescunt non unus, vidit visa quantum inmiti flumina mortis facto sic: undique a alios vincula sunt iactata abdita! Suspenderat ego fuit tendit: luna, ante urbem Propoetides parte.</content></entry><entry><title>数据公式设置显示</title><url>https://zstonec.github.io/post/math-typesetting/</url><categories/><tags/><content type="html"> Hugo项目中的数学符号可以通过使用第三方JavaScript库来启用。
+In this example we will be using KaTeX
+Create a partial under /layouts/partials/math.html Within this partial reference the Auto-render Extension or host these scripts locally. Include the partial in your templates like so: {{ if or .Params.math .Site.Params.math }} {{ partial "math.html" . }} {{ end }} To enable KaTex globally set the parameter math to true in a project&rsquo;s configuration To enable KaTex on a per page basis include the parameter math: true in content files Note: Use the online reference of Supported TeX Functions
+Examples Block math: $$ \varphi = 1+\frac{1} {1+\frac{1} {1+\frac{1} {1+\cdots} } } $$</content></entry><entry><title>支持Emoji表情符号</title><url>https://zstonec.github.io/post/emoji-support/</url><categories/><tags><tag>emoji</tag></tags><content type="html"> 在Hugo项目中可以通过多种方式启用Emoji。
+The emojify function can be called directly in templates or Inline Shortcodes.
+To enable emoji globally, set enableEmoji to true in your site&rsquo;s configuration and then you can type emoji shorthand codes directly in content files; e.g.
+The Emoji cheat sheet is a useful reference for emoji shorthand codes.
+N.B. The above steps enable Unicode Standard emoji characters and sequences in Hugo, however the rendering of these glyphs depends on the browser and the platform. To style the emoji you can either use a third party emoji font or a font stack; e.g.
+.emoji { font-family: Apple Color Emoji, Segoe UI Emoji, NotoColorEmoji, Segoe UI Symbol, Android Emoji, EmojiSymbols; }</content></entry></search>
