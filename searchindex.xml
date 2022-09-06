@@ -1,28 +1,7 @@
-<?xml version="1.0" encoding="utf-8" standalone="yes"?><search><entry><title>Druid Kafka Index Service支持多topic改造</title><url>https://zstonec.github.io/post/multi-kafka-index/</url><categories/><tags><tag>druid</tag></tags><content type="html"> Druid实时摄取支持Kafka Index Service和Tranquility两种方式。对比Tranquility的方式，KIS具有Exactly Once语义，部署维护简单，schema实时生效等优点。然而，当前社区KIS仅支持从一个topic摄取数据，写入一个dataSource。而我们的场景是请求、曝光、点击分别有一个topic，每个topic的日志格式一致（每个topic都各自有下游的统计等其他任务）。然后通过Tranquility摄取到同一个dataSource中。如果改为KIS摄取，按照摄取的建议，需要在上游将请求、曝光、点击写入一个新的topic中。这带来两个问题：1.我们的数据量非常大，如果再建一个新的topic，几乎等于kafka的流量翻倍，成本和运维压力巨大；2.请求、曝光的数据量较大（重要性相对较低），而点击等日志量较小（重要性相对较高）。如果都放在一个topic中，不同日志之间可能会相互影响。因此，我们需要改造KIS，支持从多个topic摄取，写入到一个dataSource中。
-某天凌晨，突然收到报警，有Tranquility任务失败。查看druid peon节点日志，发现如下异常
-咦？看到java.lang.OutOfMemoryError，第一反应是内存不够了。可查看当前机器内存，显示内存很充足。监控也显示发生异常时内存没有太大波动。难道是线程数超出了系统限制？通过ps -xH | wc -l 命令看到当前系统中总共有18520个线程。逐个查看java进程的线程，发现其中一个Tranquility任务线程数为11088，另一个Tranquility线程数为3048。现在有两个问题要排查：1.系统允许的最大线程数是多少呢？2.为啥Tranquility任务使用了这么多线程。
-第一个问题:
-​ cat /proc/sys/kernel/threads-max 显示3094961。
-如果按照这个来，显然1万8还没有超过限制。通过跑测试case测试：
-https://github.com/jheusser/core-java-performance-examples/blob/ea9b9e3b0e8102e474ca82827ce9ad065d7b8d67/src/test/java/com/google/code/java/core/threads/MaxThreadsMain.java
-发现系统只能创建1.8万的线程。怎么回事？只能求助PE。PE排查了一下，给到了以下结论：
-​ cat /sys/fs/cgroup/pids/user.slice/user-9762.slice/pids.max 显示18923
-​ 原来是单个用户创建的线程数量是1.8万的限制。
-那剩下第二个问题：为啥Tranquility任务要创建这么多线程呢。首先看一下都有哪些线程，通过jstack命令打印当前线程，发现名称为Curator-ServiceCache-0的线程有1万多。因此怀疑代码中两种可能的问题：1.某些特定场景时会无限创建线程 2.可能是无用的线程没有释放。要定位问题，首先要定位问题发生在哪里。
-通过线程名称，判断与Curator的ServiceCache功能有关，全局搜了下Curator-ServiceCache，并没有找到。后来在这段代码中发现了端倪。
-跟踪发现，每次创建serviceCache时都会创建一个单线程的线程池。
-首先怀疑是Tranquility中有些逻辑会创建大量线程。跟踪代码发现，在两个地方会使用serviceCache。一个地方是com.metamx.tranquility.druid.IndexService#submit。创建索引任务的时候会在zk的 /tranquility/beams/xxx:overlord 中创建节点，记录当前任务的interval、分片、副本信息。第二个地方是com.metamx.tranquility.druid.CuratorTaskLocator#connect，发送消息到peon节点的时候。具体是哪里呢？因为线程名称中没有zk路径，不好判断。突然想到可以dump下堆内存，看看具体是哪里的serviceCache。
-执行jmap命令,dump内存：jmap -dump:format=b,file=pid.dump pid
-还好，只有2.7G。拉到本地用VisualVM打开。
-如图，可以看到是发送消息到peon节点时候用的serviceCache。这时候看到PathChildrenCache的状态都是closed的状态。奇怪，cache都已经Close了，为啥线程还在呢？带着这个问题，翻开源码我们可以看到。
-CloseableExecutorService默认shutdownOnClose是false，关闭cache的时候并不会shutdown线程。查看最新的Curator代码，发现这个问题已经被修复了(知道4.3.0版本才修复)。
-如果存在线程泄露，为什么之前一直没有问题呢？是不是之前一直靠gc来释放线程，如果没有gc掉，这些线程就会一直存在。为了验证这个问题，执行了下jmap -histo:live pid。第一次执行发现有4000多个Thread对象。第二次执行发现Thread对象只有300个左右。原因是第一次执行的时候触发了fullgc，无用的线程已经gc掉了。至此，问题根源已经定位明确，剩下的就是问题解决了。
-解决方案1：升级Curator到4.3.0，查资料发现Curator不支持zookeeper3.4.x了。会有比较大的兼容性风险。
-解决方案2：修改调用程序，显示传入ExecutorService。发现调用serviceCache的地方是在com.metamx的scala-util包里，改动的话还要用sbt重新打包，也比较麻烦。
-解决方案3：下载Curator 2.10.0源码，修改shutdownOnClose为true，重新打包。然后将Tranquility依赖的Curator排除干净，改为依赖自己打包的Curator。部署到线上之后，灰度效果如下。
-之前线上任务
-修改后重新部署的任务
-效果非常明显。</content></entry><entry><title>Tranquility线程溢出问题排查</title><url>https://zstonec.github.io/post/tranquility-thread/</url><categories/><tags><tag>druid</tag></tags><content type="html"> 本文记录一次生产环境Tranquility线程溢出的问题。
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><search><entry><title>Druid Kafka Index Service支持多topic改造</title><url>https://zstonec.github.io/post/multi-kafka-index/</url><categories/><tags><tag>druid</tag></tags><content type="html"> Druid实时摄取支持Kafka Index Service和Tranquility两种方式。对比Tranquility的方式，KIS具有Exactly Once语义，部署维护简单，schema实时生效等优点。然而，当前社区KIS仅支持从一个topic摄取数据，写入一个dataSource。而我们的场景是请求、曝光、点击分别有一个topic，每个topic的日志格式一致（每个topic都各自有下游的统计等其他任务）。然后通过Tranquility摄取到同一个dataSource中。如果改为KIS摄取，按照社区的建议，需要在上游将请求、曝光、点击写入一个新的topic中。这带来两个问题：1.我们的数据量非常大，如果再建一个新的topic，几乎等于kafka的流量翻倍，成本和运维压力巨大；2.请求、曝光的数据量较大（重要性相对较低），而点击等日志量较小（重要性相对较高）。如果都放在一个topic中，不同日志之间可能会相互影响。因此，我们需要改造KIS，支持从多个topic摄取，写入到一个dataSource中。
+为了改造源码，我们首选需要了解KIS。KIS分为两个大的部分：Supervisor和KafkaIndexTask。KafkaIndexTask负责消费kafka数据（每个task负责一部分partition），生成segment，而Supervisor则负责管理KafkaIndexTask，维护当前消费进度等元信息。因此，有两种改造思路。第一种思路：多个topic共用一个Supervisor，然后按照topic和partition拆分task。每个task消费和生成索引的逻辑不变；第二中思路：每个topic使用单独的Supervisor，管理各自的task，多个Supervisor写入同一个dataSource。
+首先，我按照思路一进行了尝试，发现改动点较多：1.druid_dataSource这个表的元数据格式需要改变，支持多个topic，这会导致代码中很多类的变更。最终选定了思路二进行改造。在改造时解决了如下的问题：
+不同topic的Supervisor需要区分开来。原生Supervisor使用dataSource作为id，提交相同dataSource的Supervisor视为更新。所以需要在Supervisor生成id的时候加入topic，而如果直接使用topic名称的话，有些topic会比较长，不是很好维护，所以在提交schema时加入tag字段，标识哪个topic，然后生成Supervisor id时拼接tag。 Supervisor启动时会查找已有的任务，原有逻辑是通过dataSource查找。需要加入tag来区分。有两种区分思路，第一种是将task的dataSource拼接上tag，实践发现会带来很多坑，druid在很多地方会校验task的dataSource与segment的dataSource需要一致，需要很多兼容代码兼容。另外一种思路是在task的context里加入tag。首先根据dataSource找到所有task，然后再根据context中的tag筛选，这样改动较小，缺点时如果task太多的话可能有性能问题。最终选择了第二种。 不同Supervisor生成的task需要写同一个(dataSource,interval)的数据，也就是要获取相同的taskLock。所以这些不同的task需要有相同的taskGroupId。 不同的Supervisor需要对应不同的druid_dataSource记录，用来记录不同topic的消费进度。消费进度默认是一个task结束时，发布完segment，然后将消费进度写入数据库，写入时默认使用segment对应的dataSource作为主键。通过更改druid-server写入时的代码，增加可以指定元信息key的api解决。 改造后，相对于原先Tranquility摄取的方式，多个topic拆分kis摄取的方式会增加task的数量，生成的segment的数量也会增多，而且不同topic因为数据量级不一致，会导致不同segment的大小差异较大，这点可以通过离线重新摄取解决。</content></entry><entry><title>Tranquility线程溢出问题排查</title><url>https://zstonec.github.io/post/tranquility-thread/</url><categories/><tags><tag>druid</tag></tags><content type="html"> 本文记录一次生产环境Tranquility线程溢出的问题。
 某天凌晨，突然收到报警，有Tranquility任务失败。查看druid peon节点日志，发现如下异常
 咦？看到java.lang.OutOfMemoryError，第一反应是内存不够了。可查看当前机器内存，显示内存很充足。监控也显示发生异常时内存没有太大波动。难道是线程数超出了系统限制？通过ps -xH | wc -l 命令看到当前系统中总共有18520个线程。逐个查看java进程的线程，发现其中一个Tranquility任务线程数为11088，另一个Tranquility线程数为3048。现在有两个问题要排查：1.系统允许的最大线程数是多少呢？2.为啥Tranquility任务使用了这么多线程。
 第一个问题:
