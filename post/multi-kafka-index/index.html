@@ -3,13 +3,279 @@
 <time itemprop=dateCreated datetime=2016-03-22T13:04:35+08:00 content="2022-09-02">2022-09-02</time></span>
 <span>|
 <i class="fa fa-file-word-o fa-fw"></i><span class=post-meta-item-text>字数：</span>
-<span class=leancloud-world-count>12 字</span></span>
+<span class=leancloud-world-count>423 字</span></span>
 <span>|
 <i class="fa fa-eye fa-fw"></i><span class=post-meta-item-text>阅读：</span>
-<span class=leancloud-view-count>1分钟</span></span>
+<span class=leancloud-view-count>2分钟</span></span>
 <span id=/post/multi-kafka-index/ class=leancloud_visitors data-flag-title="Druid Kafka Index Service支持多topic改造">|
 <i class="fa fa-binoculars fa-fw"></i><span class=post-meta-item-text>阅读次数：</span>
-<span class=leancloud-visitors-count></span></span></div></header><div class=post-body itemprop=articleBody><p>Druid实时摄取支持Kafka Index Service和Tranquility两种方式。对比Tranquility的方式，KIS具有Exactly Once语义，部署维护简单，schema实时生效等优点。然而，当前社区KIS仅支持从一个topic摄取数据，写入一个dataSource。而我们的场景是请求、曝光、点击分别有一个topic，每个topic的日志格式一致（每个topic都各自有下游的统计等其他任务）。然后通过Tranquility摄取到同一个dataSource中。如果改为KIS摄取，按照社区的建议，需要在上游将请求、曝光、点击写入一个新的topic中。这带来两个问题：1.我们的数据量非常大，如果再建一个新的topic，几乎等于kafka的流量翻倍，成本和运维压力巨大；2.请求、曝光的数据量较大（重要性相对较低），而点击等日志量较小（重要性相对较高）。如果都放在一个topic中，不同日志之间可能会相互影响。因此，我们需要改造KIS，支持从多个topic摄取，写入到一个dataSource中。</p><p>为了改造源码，我们首选需要了解KIS。KIS分为两个大的部分：Supervisor和KafkaIndexTask。KafkaIndexTask负责消费kafka数据（每个task负责一部分partition），生成segment，而Supervisor则负责管理KafkaIndexTask，维护当前消费进度等元信息。因此，有两种改造思路。第一种思路：多个topic共用一个Supervisor，然后按照topic和partition拆分task。每个task消费和生成索引的逻辑不变；第二中思路：每个topic使用单独的Supervisor，管理各自的task，多个Supervisor写入同一个dataSource。</p><p>首先，我按照思路一进行了尝试，发现改动点较多：1.<code>druid_dataSource</code>这个表的元数据格式需要改变，支持多个topic，这会导致代码中很多类的变更。最终选定了思路二进行改造。在改造时解决了如下的问题：</p><ol><li>不同topic的Supervisor需要区分开来。原生Supervisor使用dataSource作为id，提交相同dataSource的Supervisor视为更新。所以需要在Supervisor生成id的时候加入topic，而如果直接使用topic名称的话，有些topic会比较长，不是很好维护，所以在提交schema时加入tag字段，标识哪个topic，然后生成Supervisor id时拼接tag。</li><li>Supervisor启动时会查找已有的任务，原有逻辑是通过dataSource查找。需要加入tag来区分。有两种区分思路，第一种是将task的dataSource拼接上tag，实践发现会带来很多坑，druid在很多地方会校验task的dataSource与segment的dataSource需要一致，需要很多兼容代码兼容。另外一种思路是在task的context里加入tag。首先根据dataSource找到所有task，然后再根据context中的tag筛选，这样改动较小，缺点时如果task太多的话可能有性能问题。最终选择了第二种。</li><li>不同Supervisor生成的task需要写同一个(dataSource,interval)的数据，也就是要获取相同的taskLock。所以这些不同的task需要有相同的taskGroupId。</li><li>不同的Supervisor需要对应不同的<code>druid_dataSource</code>记录，用来记录不同topic的消费进度。消费进度默认是一个task结束时，发布完segment，然后将消费进度写入数据库，写入时默认使用segment对应的dataSource作为主键。通过更改druid-server写入时的代码，增加可以指定元信息key的api解决。</li></ol><p>改造后，相对于原先Tranquility摄取的方式，多个topic拆分kis摄取的方式会增加task的数量，生成的segment的数量也会增多，而且不同topic因为数据量级不一致，会导致不同segment的大小差异较大，这点可以通过离线重新摄取解决。</p></div><footer class=post-footer><div class=post-tags><a href=/tags/druid rel=tag title=druid>#druid#</a></div><div class=post-nav><div class=clear></div></div><div class=reward-qr-info></div><div class=post-nav><div class="post-nav-next post-nav-item"></div><div class="post-nav-prev post-nav-item"><a href=https://zstonec.github.io/post/tranquility-thread/ rel=prev title=Tranquility线程溢出问题排查>Tranquility线程溢出问题排查
+<span class=leancloud-visitors-count></span></span></div></header><div class=post-body itemprop=articleBody><p>Druid实时摄取支持Kafka Index Service和Tranquility两种方式。对比Tranquility的方式，KIS具有Exactly Once语义，部署维护简单，schema实时生效等优点。然而，当前社区KIS仅支持从一个topic摄取数据，写入一个dataSource。而我们的场景是请求、曝光、点击分别有一个topic，每个topic的日志格式一致（每个topic都各自有下游的统计等其他任务）。然后通过Tranquility摄取到同一个dataSource中。如果改为KIS摄取，按照社区的建议，需要在上游将请求、曝光、点击写入一个新的topic中。这带来两个问题：1.我们的数据量非常大，如果再建一个新的topic，几乎等于kafka的流量翻倍，成本和运维压力巨大；2.请求、曝光的数据量较大（重要性相对较低），而点击等日志量较小（重要性相对较高）。如果都放在一个topic中，不同日志之间可能会相互影响。因此，我们需要改造KIS，支持从多个topic摄取，写入到一个dataSource中。</p><p>针对这个问题，社区也有同样的需求：https://github.com/apache/druid/issues/13222 和 <a href=https://github.com/apache/druid/pull/2656#issuecomment-215328237>https://github.com/apache/druid/pull/2656#issuecomment-215328237</a> 。然而社区并未回应。</p><p>为了改造源码，我们首选需要了解KIS。KIS分为两个大的部分：Supervisor和KafkaIndexTask。KafkaIndexTask负责消费kafka数据（每个task负责一部分partition），生成segment，而Supervisor则负责管理KafkaIndexTask，维护当前消费进度等元信息。因此，有两种改造思路。第一种思路：多个topic共用一个Supervisor，然后按照topic和partition拆分task。每个task消费和生成索引的逻辑不变；第二种思路：每个topic使用单独的Supervisor，管理各自的task，多个Supervisor写入同一个dataSource。</p><p>KIS摄取的配置文件如下：</p><p>{
+&ldquo;type&rdquo;: &ldquo;kafka&rdquo;,
+&ldquo;dataSchema&rdquo;: {
+&ldquo;dataSource&rdquo;: &ldquo;demo_datasource&rdquo;,
+&ldquo;parser&rdquo;: {
+&ldquo;type&rdquo;: &ldquo;string&rdquo;,
+&ldquo;parseSpec&rdquo;: {
+&ldquo;format&rdquo;: &ldquo;json&rdquo;,
+&ldquo;timestampSpec&rdquo;: {
+&ldquo;column&rdquo;: &ldquo;time&rdquo;,
+&ldquo;format&rdquo;: &ldquo;auto&rdquo;
+},
+&ldquo;dimensionsSpec&rdquo;: {
+&ldquo;dimensions&rdquo;: [
+&ldquo;flight_id&rdquo;
+]
+}
+}
+},
+&ldquo;metricsSpec&rdquo;: [
+{
+&ldquo;name&rdquo;: &ldquo;count&rdquo;,
+&ldquo;type&rdquo;: &ldquo;count&rdquo;
+},
+{
+&ldquo;name&rdquo;: &ldquo;exposure&rdquo;,
+&ldquo;type&rdquo;: &ldquo;longSum&rdquo;,
+&ldquo;fieldName&rdquo;: &ldquo;exposure&rdquo;
+},
+{
+&ldquo;name&rdquo;: &ldquo;click&rdquo;,
+&ldquo;type&rdquo;: &ldquo;longSum&rdquo;,
+&ldquo;fieldName&rdquo;: &ldquo;click&rdquo;
+}
+],
+&ldquo;granularitySpec&rdquo;: {
+&ldquo;type&rdquo;: &ldquo;uniform&rdquo;,
+&ldquo;segmentGranularity&rdquo;: &ldquo;HOUR&rdquo;,
+&ldquo;queryGranularity&rdquo;: &ldquo;MINUTE&rdquo;
+}
+},
+&ldquo;tuningConfig&rdquo;: {
+&ldquo;type&rdquo;: &ldquo;kafka&rdquo;,
+&ldquo;maxRowsPerSegment&rdquo;: 500000000
+},
+&ldquo;ioConfig&rdquo;: {
+&ldquo;topic&rdquo;: &ldquo;demo_exposure&rdquo;,
+&ldquo;inputFormat&rdquo;: {
+&ldquo;type&rdquo;: &ldquo;json&rdquo;
+},
+&ldquo;consumerProperties&rdquo;: {
+&ldquo;bootstrap.servers&rdquo;: &ldquo;localhost:9092&rdquo;
+},
+&ldquo;taskCount&rdquo;: 2,
+&ldquo;replicas&rdquo;: 1,
+&ldquo;taskDuration&rdquo;: &ldquo;PT1H&rdquo;,
+&ldquo;lateMessageRejectionPeriod&rdquo;: &ldquo;PT2H&rdquo;
+}
+}</p><p>如果按照思路一，摄取的配置应该改为如下所示：</p><p>{
+&ldquo;type&rdquo;: &ldquo;multiKafka&rdquo;,
+&ldquo;dataSchema&rdquo;: {
+&ldquo;dataSource&rdquo;: &ldquo;demo_datasource&rdquo;,
+&ldquo;parser&rdquo;: {
+&ldquo;type&rdquo;: &ldquo;string&rdquo;,
+&ldquo;parseSpec&rdquo;: {
+&ldquo;format&rdquo;: &ldquo;json&rdquo;,
+&ldquo;timestampSpec&rdquo;: {
+&ldquo;column&rdquo;: &ldquo;time&rdquo;,
+&ldquo;format&rdquo;: &ldquo;auto&rdquo;
+},
+&ldquo;dimensionsSpec&rdquo;: {
+&ldquo;dimensions&rdquo;: [
+&ldquo;flight_id&rdquo;
+]
+}
+}
+},
+&ldquo;metricsSpec&rdquo;: [
+{
+&ldquo;name&rdquo;: &ldquo;count&rdquo;,
+&ldquo;type&rdquo;: &ldquo;count&rdquo;
+},
+{
+&ldquo;name&rdquo;: &ldquo;exposure&rdquo;,
+&ldquo;type&rdquo;: &ldquo;longSum&rdquo;,
+&ldquo;fieldName&rdquo;: &ldquo;exposure&rdquo;
+},
+{
+&ldquo;name&rdquo;: &ldquo;click&rdquo;,
+&ldquo;type&rdquo;: &ldquo;longSum&rdquo;,
+&ldquo;fieldName&rdquo;: &ldquo;click&rdquo;
+}
+],
+&ldquo;granularitySpec&rdquo;: {
+&ldquo;type&rdquo;: &ldquo;uniform&rdquo;,
+&ldquo;segmentGranularity&rdquo;: &ldquo;HOUR&rdquo;,
+&ldquo;queryGranularity&rdquo;: &ldquo;MINUTE&rdquo;
+}
+},
+&ldquo;tuningConfig&rdquo;: {
+&ldquo;type&rdquo;: &ldquo;kafka&rdquo;,
+&ldquo;maxRowsPerSegment&rdquo;: 500000000
+},
+&ldquo;ioConfig&rdquo;: {
+&ldquo;topics&rdquo;: [
+&ldquo;demo_exposure&rdquo;,
+&ldquo;demo_click&rdquo;
+],
+&ldquo;inputFormat&rdquo;: {
+&ldquo;type&rdquo;: &ldquo;json&rdquo;
+},
+&ldquo;consumerProperties&rdquo;: {
+&ldquo;bootstrap.servers&rdquo;: &ldquo;localhost:9092&rdquo;
+},
+&ldquo;taskCountMap&rdquo;: {
+&ldquo;demo_exposure&rdquo;: 2,
+&ldquo;demo_click&rdquo;: 1
+},
+&ldquo;replicas&rdquo;: 1,
+&ldquo;taskDuration&rdquo;: &ldquo;PT1H&rdquo;,
+&ldquo;lateMessageRejectionPeriod&rdquo;: &ldquo;PT2H&rdquo;
+}
+}</p><p>如果按照思路二，摄取的配置应该有两个：</p><p>{
+&ldquo;type&rdquo;: &ldquo;multiKafka&rdquo;,
+&ldquo;tag&rdquo;: &ldquo;exposure&rdquo;,
+&ldquo;dataSchema&rdquo;:
+{
+&ldquo;dataSource&rdquo;: &ldquo;demo_datasource&rdquo;,
+&ldquo;parser&rdquo;:
+{
+&ldquo;type&rdquo;: &ldquo;string&rdquo;,
+&ldquo;parseSpec&rdquo;:
+{
+&ldquo;format&rdquo;: &ldquo;json&rdquo;,
+&ldquo;timestampSpec&rdquo;:
+{
+&ldquo;column&rdquo;: &ldquo;time&rdquo;,
+&ldquo;format&rdquo;: &ldquo;auto&rdquo;
+},
+&ldquo;dimensionsSpec&rdquo;:
+{
+&ldquo;dimensions&rdquo;:
+[
+&ldquo;flight_id&rdquo;
+]
+}
+}
+},
+&ldquo;metricsSpec&rdquo;:
+[
+{
+&ldquo;name&rdquo;: &ldquo;count&rdquo;,
+&ldquo;type&rdquo;: &ldquo;count&rdquo;
+},
+{
+&ldquo;name&rdquo;: &ldquo;exposure&rdquo;,
+&ldquo;type&rdquo;: &ldquo;longSum&rdquo;,
+&ldquo;fieldName&rdquo;: &ldquo;exposure&rdquo;
+},
+{
+&ldquo;name&rdquo;: &ldquo;click&rdquo;,
+&ldquo;type&rdquo;: &ldquo;longSum&rdquo;,
+&ldquo;fieldName&rdquo;: &ldquo;click&rdquo;
+}
+],
+&ldquo;granularitySpec&rdquo;:
+{
+&ldquo;type&rdquo;: &ldquo;uniform&rdquo;,
+&ldquo;segmentGranularity&rdquo;: &ldquo;HOUR&rdquo;,
+&ldquo;queryGranularity&rdquo;: &ldquo;MINUTE&rdquo;
+}
+},
+&ldquo;tuningConfig&rdquo;:
+{
+&ldquo;type&rdquo;: &ldquo;multiKafka&rdquo;,
+&ldquo;maxRowsPerSegment&rdquo;: 500000000
+},
+&ldquo;ioConfig&rdquo;:
+{
+&ldquo;topic&rdquo;: &ldquo;demo_exposure&rdquo;
+&ldquo;inputFormat&rdquo;:
+{
+&ldquo;type&rdquo;: &ldquo;json&rdquo;
+},
+&ldquo;consumerProperties&rdquo;:
+{
+&ldquo;bootstrap.servers&rdquo;: &ldquo;localhost:9092&rdquo;
+},
+&ldquo;taskCount&rdquo;: 2,
+&ldquo;replicas&rdquo;: 1,
+&ldquo;taskDuration&rdquo;: &ldquo;PT1H&rdquo;,
+&ldquo;lateMessageRejectionPeriod&rdquo;: &ldquo;PT3H&rdquo;,
+&ldquo;completionTimeout&rdquo;: &ldquo;PT3H&rdquo;
+}
+}</p><p>{
+&ldquo;type&rdquo;: &ldquo;multiKafka&rdquo;,
+&ldquo;tag&rdquo;: &ldquo;click&rdquo;,
+&ldquo;dataSchema&rdquo;:
+{
+&ldquo;dataSource&rdquo;: &ldquo;demo_datasource&rdquo;,
+&ldquo;parser&rdquo;:
+{
+&ldquo;type&rdquo;: &ldquo;string&rdquo;,
+&ldquo;parseSpec&rdquo;:
+{
+&ldquo;format&rdquo;: &ldquo;json&rdquo;,
+&ldquo;timestampSpec&rdquo;:
+{
+&ldquo;column&rdquo;: &ldquo;time&rdquo;,
+&ldquo;format&rdquo;: &ldquo;auto&rdquo;
+},
+&ldquo;dimensionsSpec&rdquo;:
+{
+&ldquo;dimensions&rdquo;:
+[
+&ldquo;flight_id&rdquo;
+]
+}
+}
+},
+&ldquo;metricsSpec&rdquo;:
+[
+{
+&ldquo;name&rdquo;: &ldquo;count&rdquo;,
+&ldquo;type&rdquo;: &ldquo;count&rdquo;
+},
+{
+&ldquo;name&rdquo;: &ldquo;exposure&rdquo;,
+&ldquo;type&rdquo;: &ldquo;longSum&rdquo;,
+&ldquo;fieldName&rdquo;: &ldquo;exposure&rdquo;
+},
+{
+&ldquo;name&rdquo;: &ldquo;click&rdquo;,
+&ldquo;type&rdquo;: &ldquo;longSum&rdquo;,
+&ldquo;fieldName&rdquo;: &ldquo;click&rdquo;
+}
+],
+&ldquo;granularitySpec&rdquo;:
+{
+&ldquo;type&rdquo;: &ldquo;uniform&rdquo;,
+&ldquo;segmentGranularity&rdquo;: &ldquo;HOUR&rdquo;,
+&ldquo;queryGranularity&rdquo;: &ldquo;MINUTE&rdquo;
+}
+},
+&ldquo;tuningConfig&rdquo;:
+{
+&ldquo;type&rdquo;: &ldquo;multiKafka&rdquo;,
+&ldquo;maxRowsPerSegment&rdquo;: 500000000
+},
+&ldquo;ioConfig&rdquo;:
+{
+&ldquo;topic&rdquo;: &ldquo;demo_click&rdquo;
+&ldquo;inputFormat&rdquo;:
+{
+&ldquo;type&rdquo;: &ldquo;json&rdquo;
+},
+&ldquo;consumerProperties&rdquo;:
+{
+&ldquo;bootstrap.servers&rdquo;: &ldquo;localhost:9092&rdquo;
+},
+&ldquo;taskCount&rdquo;: 2,
+&ldquo;replicas&rdquo;: 1,
+&ldquo;taskDuration&rdquo;: &ldquo;PT1H&rdquo;,
+&ldquo;lateMessageRejectionPeriod&rdquo;: &ldquo;PT3H&rdquo;,
+&ldquo;completionTimeout&rdquo;: &ldquo;PT3H&rdquo;
+}
+}</p><p>首先，我按照思路一进行了尝试，发现改动点较多：1.<code>druid_dataSource</code>这个表的元数据格式需要改变，支持多个topic，这会导致代码中很多类的变更。最终选定了思路二进行改造。在改造时解决了如下的问题：</p><ol><li>不同topic的Supervisor需要区分开来。原生Supervisor使用dataSource作为id，提交相同dataSource的Supervisor视为更新。所以需要在Supervisor生成id的时候加入topic，而如果直接使用topic名称的话，有些topic会比较长，不是很好维护，所以在提交schema时加入tag字段，标识哪个topic，然后生成Supervisor id时拼接tag。</li><li>Supervisor启动时会查找已有的任务，原有逻辑是通过dataSource查找。需要加入tag来区分。有两种区分思路，第一种是将task的dataSource拼接上tag，实践发现会带来很多坑，druid在很多地方会校验task的dataSource与segment的dataSource需要一致，需要很多兼容代码兼容。另外一种思路是在task的context里加入tag。首先根据dataSource找到所有task，然后再根据context中的tag筛选，这样改动较小，缺点时如果task太多的话可能有性能问题。最终选择了第二种。</li><li>不同Supervisor生成的task需要写同一个(dataSource,interval)的数据，也就是要获取相同的taskLock。所以这些不同的task需要有相同的taskGroupId。</li><li>不同的Supervisor需要对应不同的<code>druid_dataSource</code>记录，用来记录不同topic的消费进度。消费进度默认是一个task结束时，发布完segment，然后将消费进度写入数据库，写入时默认使用segment对应的dataSource作为主键。通过更改druid-server写入时的代码，增加可以指定元信息key的api解决。</li></ol><p>改造后，相对于原先Tranquility摄取的方式，多个topic拆分kis摄取的方式会增加task的数量，生成的segment的数量也会增多，而且不同topic因为数据量级不一致，会导致不同segment的大小差异较大，这点可以通过离线重新摄取解决。</p></div><footer class=post-footer><div class=post-tags><a href=/tags/druid rel=tag title=druid>#druid#</a></div><div class=post-nav><div class=clear></div></div><div class=reward-qr-info></div><div class=post-nav><div class="post-nav-next post-nav-item"></div><div class="post-nav-prev post-nav-item"><a href=https://zstonec.github.io/post/tranquility-thread/ rel=prev title=Tranquility线程溢出问题排查>Tranquility线程溢出问题排查
 <i class="fa fa-chevron-right"></i></a></div></div><div id=wcomments></div></footer></article></section></div></div><div class=sidebar-toggle><div class=sidebar-toggle-line-wrap><span class="sidebar-toggle-line sidebar-toggle-line-first"></span><span class="sidebar-toggle-line sidebar-toggle-line-middle"></span><span class="sidebar-toggle-line sidebar-toggle-line-last"></span></div></div><aside id=sidebar class=sidebar><div class=sidebar-inner><section class="site-overview sidebar-panel sidebar-panel-active"><div class="site-author motion-element" itemprop=author itemscope itemtype=http://schema.org/Person><img class=site-author-image itemprop=image src=/img/avatar.png alt=北溟><p class=site-author-name itemprop=name>北溟</p><p class="site-description motion-element" itemprop=description></p></div><nav class="site-state motion-element"><div class="site-state-item site-state-posts"><a href=/post/><span class=site-state-item-count>10</span>
 <span class=site-state-item-name>日志</span></a></div><div class="site-state-item site-state-categories"><a href=/categories/><span class=site-state-item-count>2</span>
 <span class=site-state-item-name>分类</span></a></div><div class="site-state-item site-state-tags"><a href=/tags/><span class=site-state-item-count>10</span>
